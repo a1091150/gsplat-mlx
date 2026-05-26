@@ -144,20 +144,25 @@ def compare_spherical_harmonics(data: np.lib.npyio.NpzFile) -> list[bool]:
 
 
 def compare_quat_scale(data: np.lib.npyio.NpzFile) -> list[bool]:
+    compute_covar = bool(scalar(data, "input__compute_covar")) if "input__compute_covar" in data.files else True
+    compute_preci = bool(scalar(data, "input__compute_preci")) if "input__compute_preci" in data.files else True
+    triu = bool(scalar(data, "input__triu")) if "input__triu" in data.files else True
     actual = quat_scale_to_covar_preci_forward(
         {
             "quats": mx_array(data, "input__quats"),
             "scales": mx_array(data, "input__scales"),
         },
-        compute_covar=True,
-        compute_preci=True,
-        triu=True,
+        compute_covar=compute_covar,
+        compute_preci=compute_preci,
+        triu=triu,
     )
     mx.eval(*actual.values())
-    return [
-        compare_array("covars", ref(data, "covars"), mx_to_numpy(actual["covars"]), atol=1.0e-4, rtol=1.0e-4),
-        compare_array("precis", ref(data, "precis"), mx_to_numpy(actual["precis"]), atol=1.0e-4, rtol=1.0e-4),
-    ]
+    results = []
+    if "ref__covars" in data.files:
+        results.append(compare_array("covars", ref(data, "covars"), mx_to_numpy(actual["covars"]), atol=1.0e-4, rtol=1.0e-4))
+    if "ref__precis" in data.files:
+        results.append(compare_array("precis", ref(data, "precis"), mx_to_numpy(actual["precis"]), atol=1.0e-4, rtol=1.0e-4))
+    return results
 
 
 def compare_chain(data: np.lib.npyio.NpzFile) -> list[bool]:
@@ -243,6 +248,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
 
 EXTRA_COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_edge_cases.npz": compare_projection,
+    "quat_scale_to_covar_preci_edge_cases.npz": compare_quat_scale,
     "spherical_harmonics_degree4_masks.npz": compare_spherical_harmonics,
 }
 

@@ -21,6 +21,7 @@ export_rasterize_to_pixels_3dgs_forward.py
 export_spherical_harmonics_forward.py
 export_spherical_harmonics_degree4_masks.py
 export_quat_scale_to_covar_preci_forward.py
+export_quat_scale_to_covar_preci_edge_cases.py
 export_forward_3dgs_chain.py
 ```
 

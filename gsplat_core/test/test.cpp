@@ -1138,7 +1138,8 @@ void test_spherical_harmonics_forward_gpu_degree4_masks() {
       gsplat_core::gsplat_spherical_harmonics_forward(cpu_input);
   mx::array actual =
       gsplat_core::gsplat_spherical_harmonics_forward(gpu_input);
-  mx::eval(expected, actual);
+  mx::eval(expected);
+  mx::eval(actual);
 
   const float* expected_data = expected.data<float>();
   const float* actual_data = actual.data<float>();
@@ -1293,6 +1294,52 @@ void test_quat_scale_to_covar_preci_gpu_reference() {
   }
 
   std::cout << "quat_scale_to_covar_preci GPU reference smoke ok\n";
+}
+
+void test_quat_scale_to_covar_preci_gpu_full_precision_only() {
+  mx::array quats(
+      {0.35f, 0.2f, -0.4f, 0.8f,
+       2.0f, -1.0f, 0.5f, 0.25f,
+       1.0f, 0.0f, 0.0f, 0.0f},
+      {3, 4},
+      mx::float32);
+  mx::array scales(
+      {0.5f, 1.5f, 2.5f,
+       2.0f, 0.75f, 1.25f,
+       0.25f, 3.0f, 4.0f},
+      {3, 3},
+      mx::float32);
+
+  gsplat_core::QuatScaleToCovarPreciInput cpu_input = {
+      .quats = quats,
+      .scales = scales,
+      .s = mx::Device::cpu,
+      .compute_covar = false,
+      .compute_preci = true,
+      .triu = false,
+  };
+  gsplat_core::QuatScaleToCovarPreciInput gpu_input = cpu_input;
+  gpu_input.s = mx::Device::gpu;
+
+  std::vector<mx::array> expected =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(cpu_input);
+  std::vector<mx::array> actual =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(gpu_input);
+  expect_shape(actual[gsplat_core::kCovars], {0},
+               "quat gpu covars empty");
+  expect_shape(actual[gsplat_core::kPrecis], {3, 3, 3},
+               "quat gpu precis full");
+  mx::eval(expected);
+  mx::eval(actual);
+
+  const float* expected_precis = expected[gsplat_core::kPrecis].data<float>();
+  const float* actual_precis = actual[gsplat_core::kPrecis].data<float>();
+  for (int i = 0; i < 27; ++i) {
+    expect_close(actual_precis[i], expected_precis[i], 1.0e-5f,
+                 "quat gpu full precision only");
+  }
+
+  std::cout << "quat_scale_to_covar_preci GPU full precision-only smoke ok\n";
 }
 
 void test_3dgs_forward_chain_smoke() {
@@ -1477,6 +1524,7 @@ int main() {
     test_spherical_harmonics_forward_gpu_degree4_masks();
     test_quat_scale_to_covar_preci_reference();
     test_quat_scale_to_covar_preci_gpu_reference();
+    test_quat_scale_to_covar_preci_gpu_full_precision_only();
     test_3dgs_forward_chain_smoke();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;

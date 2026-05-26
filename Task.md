@@ -154,6 +154,7 @@
 - [x] Task 3.12: Rasterize to pixels 3DGS MLX Primitive + Metal kernel.
 - [x] Task 3.13: Projection 3DGS fused forward parity cleanup.
 - [x] Task 3.14: Spherical harmonics exported parity cleanup.
+- [x] Task 3.15: Quat/scale covariance exported parity cleanup.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -254,7 +255,10 @@
 - [x] Move quat/scale covariance from C++ reference path to MLX Primitive + Metal kernel.
 - [x] Keep CPU reference path as fallback.
 - [x] Add C++/Metal GPU smoke coverage for triu, full matrix, covariance, precision, and empty optional outputs.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] Add C++/Metal GPU smoke coverage for `compute_covar=false`, `compute_preci=true`, and `triu=false`.
+- [x] Add CUDA reference export script for full precision-only edge cases.
+- [x] Extend exported `.npz` compare support for optional covars/precis and compute flags.
+- [x] CUDA/PyTorch numeric parity for existing exported triu covar+precision fixture.
 
 ## Task 3.6 - End-to-End 3DGS Forward Smoke Chain
 - [x] Add C++ smoke coverage that chains projection, intersect tile, intersect offset, spherical harmonics, and rasterize.
@@ -411,6 +415,16 @@
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate exported `.npz` parity for the existing SH fixture.
 
+## Task 3.15 - Quat/Scale Covariance Exported Parity Cleanup
+- [x] Add C++/Metal smoke coverage for full `3x3` precision-only output.
+- [x] Compare full precision-only GPU output against CPU reference fallback.
+- [x] Add CUDA export script `scripts/export_ref/export_quat_scale_to_covar_preci_edge_cases.py`.
+- [x] Update `scripts/test/compare_exported_npz.py` to support `input__compute_covar`, `input__compute_preci`, and `input__triu`.
+- [x] Update exported `.npz` comparison to support optional `ref__covars` and `ref__precis`.
+- [x] Keep full precision-only CUDA fixture optional until exported from a CUDA machine.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate exported `.npz` parity for the existing quat/scale fixture.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -473,6 +487,7 @@
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 4 and masks.
 - [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
+- [x] Quat/scale C++/Metal smoke validates full precision-only output.
 - [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
 - [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
 - [x] Intersect tile encode C++/Metal smoke validates dense AABB unsorted GPU ids.
@@ -483,4 +498,5 @@
 - [x] Projection C++/Metal smoke validates dense culling and empty compensation behavior.
 - [x] Existing Python-facing dense `projection_ewa_3dgs_fused_forward` matches exported CUDA `.npz`.
 - [x] Existing Python-facing dense `spherical_harmonics_forward` matches exported CUDA `.npz`.
+- [x] Existing Python-facing dense `quat_scale_to_covar_preci_forward` matches exported CUDA `.npz`.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
