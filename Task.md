@@ -627,7 +627,7 @@
 
 ## Proposed Implementation Order
 - [x] Task 6.1: Backward CUDA source map and saved-tensor contract.
-- [ ] Task 6.2: Backward API design doc and `.npz` fixture schema.
+- [x] Task 6.2: Backward API design doc and `.npz` fixture schema.
 - [ ] Task 6.3: Spherical harmonics explicit backward.
 - [ ] Task 6.4: Quat/scale covariance/precision explicit backward.
 - [ ] Task 6.5: Rasterize to pixels 3DGS explicit backward.
@@ -665,3 +665,13 @@
 - [x] Document non-differentiable inputs and scalar params.
 - [x] Mark packed, 2DGS, UT/world-ray, and lidar backward as out of scope.
 - [x] Recommend `spherical_harmonics_backward` as the first implementation slice.
+
+## Task 6.2 - Backward API Design Doc And Fixture Schema
+- [x] Add `note/gsplat_backward_api_and_fixture_schema.md`.
+- [x] Define explicit backward API naming rules.
+- [x] Define Python binding dictionary groups: `inputs`, `forward_outputs`, and `cotangents`.
+- [x] Define `.npz` key prefixes: `input__*`, `fwd__*`, `cotangent__*`, `ref__v_*`, and `meta__*`.
+- [x] Define optional input and optional gradient key behavior.
+- [x] Define first CUDA export script names and expected fixture names.
+- [x] Define required fixture keys for SH, quat/scale, rasterize, and projection backward.
+- [x] Lock Task 6.3 to `spherical_harmonics_backward(...)` as the first implementation slice.
