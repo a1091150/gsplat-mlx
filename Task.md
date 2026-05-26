@@ -73,8 +73,10 @@
 - [x] `_gsplat_core` builds through Xcode.
 
 ## Notes
-- The current implementation is intentionally dummy-only.
-- Python MLX runtime checks are left to manual local testing.
+- The initial skeleton started dummy-only; the current project now includes the
+  dense 3DGS forward low-level path.
+- Python MLX runtime checks are covered by manual scripts and exported `.npz`
+  comparison scripts.
 
 ---
 
@@ -110,12 +112,37 @@
 ## 3DGS Forward Ops
 - [x] `quat_scale_to_covar_preci_fwd`
 - [x] `spherical_harmonics_fwd`
-- [x] `projection_ewa_3dgs_fused_fwd`
+- [x] `projection_ewa_3dgs_fused_fwd` dense path
 - [ ] `projection_ewa_3dgs_packed_fwd`
-- [x] `intersect_tile`
+- [x] `intersect_tile` dense path
 - [x] `intersect_offset`
-- [x] `rasterize_to_pixels_3dgs_fwd`
+- [x] `rasterize_to_pixels_3dgs_fwd` dense path
 - [ ] `rasterize_to_indices_3dgs`
+
+## Forward Milestone Status
+- Dense low-level 3DGS forward render path is implemented and validated:
+  projection fused dense -> intersect tile/offset dense -> spherical harmonics
+  -> rasterize pixels dense.
+- Dense rasterize supports optional backgrounds and tile masks.
+- Existing exported CUDA `.npz` fixtures pass on the Mac/MLX side for the dense
+  low-level chain.
+- The remaining work is for fuller gsplat CUDA forward coverage, not for the
+  current dense render smoke path.
+
+## Remaining Forward Coverage
+- Packed projection:
+  `projection_ewa_3dgs_packed_fwd`,
+  `projection_ewa_3dgs_packed_forward(...)`.
+- Packed intersect/rasterize paths:
+  support `[nnz, ...]` arrays plus `image_ids` and `gaussian_ids`.
+- Intersect advanced modes:
+  segmented sort and AccuTile/SNUGBOX path using `conics` and `opacities`.
+- Rasterize indices:
+  `rasterize_to_indices_3dgs`,
+  `rasterize_to_indices_3dgs_forward(...)`.
+- High-level Python compatibility wrapper for a gsplat-style rasterization API.
+- Additional optional CUDA fixtures:
+  rasterize masks, SH degree 4 masks, and quat/scale edge cases.
 
 ## Excluded CUDA Ops
 - [ ] `projection_2dgs_fused_fwd`
@@ -136,7 +163,7 @@
 - Keep APIs close to gsplat CUDA op semantics while using MLX arrays.
 
 ## Planned Subtasks
-- [ ] Task 3.1: Projection 3DGS fused forward numeric parity.
+- [x] Task 3.1: Projection 3DGS fused forward numeric parity.
 - [x] Task 3.2: Intersect tile / intersect offset forward.
 - [x] Task 3.3: Rasterize to pixels 3DGS forward.
 - [x] Task 3.4: Spherical harmonics forward.
@@ -207,7 +234,7 @@
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
 - [ ] Support segmented sort.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] CUDA/PyTorch numeric parity for exported dense fixture.
 
 ## Task 3.3 - Rasterize To Pixels 3DGS Forward
 - [x] Add `gsplat_core/include/gsplat_rasterize.h`.
@@ -224,7 +251,7 @@
 - [x] Validate Python-facing rasterize output against exported CUDA `.npz`.
 - [x] Support masks.
 - [ ] Support packed path.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] CUDA/PyTorch numeric parity for exported dense fixture.
 
 ## Task 3.4 - Spherical Harmonics Forward
 - [x] Add `gsplat_core/include/gsplat_spherical_harmonics.h`.
@@ -267,9 +294,9 @@
 - [x] Verify render output shapes for colors, alphas, and last ids.
 - [x] Verify the smoke scene produces nonzero alpha and expected red-only color energy.
 - [x] Add manual Python script `scripts/test/forward_3dgs_chain.py`.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] CUDA/PyTorch numeric parity for exported dense chain fixture.
 - [ ] High-level Python rasterization compatibility wrapper.
-- [ ] Full Metal implementations for the current C++ reference-path ops.
+- [x] Full Metal implementations for the current dense low-level chain.
 
 ## Task 3.7 - CUDA/PyTorch Parity Reference Scripts
 - [x] Add shared parity helper `scripts/test/parity_utils.py`.
@@ -280,8 +307,9 @@
 - [x] Add quat/scale covariance/precision parity script against `gsplat.cuda._wrapper.quat_scale_to_covar_preci`.
 - [x] Add end-to-end forward chain parity script.
 - [x] Scripts skip clearly when PyTorch CUDA or gsplat CUDA wrapper is unavailable.
-- [ ] Run and record numeric parity on a CUDA machine.
-- [ ] Tune tolerances after first CUDA reference run.
+- [x] Run and record numeric parity from exported CUDA `.npz` fixtures on the Mac/MLX side.
+- [x] Tune tolerances for current exported dense fixtures.
+- [ ] Run direct parity scripts on a CUDA machine.
 
 ## Task 3.8 - CUDA Reference NPZ Export Scripts
 - [x] Add `scripts/export_ref` for CUDA/Colab-only gsplat reference exports.
@@ -292,6 +320,7 @@
 - [x] Add `.npz` export script for spherical harmonics.
 - [x] Add `.npz` export script for quat/scale covariance/precision.
 - [x] Add `.npz` export script for the end-to-end 3DGS forward chain.
+- [x] Add optional edge-case `.npz` export scripts for projection, SH masks, quat/scale, and rasterize masks.
 - [x] Document export usage in `scripts/export_ref/README.md`.
 - [x] Add Mac/MLX compare scripts that consume exported `.npz` files.
 
@@ -304,8 +333,8 @@
 - [x] Route Python binding `spherical_harmonics_forward` through GPU.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
-- [ ] Run Python manual script after local package reinstall.
-- [ ] Compare against exported CUDA `.npz` reference.
+- [x] Run Python-facing exported `.npz` comparison after local package reinstall.
+- [x] Compare against exported CUDA `.npz` reference for current available fixture.
 
 ## Task 3.10 - Quat/Scale Covariance/Precision MLX Primitive + Metal Kernel
 - [x] Add `GSPlatQuatScaleToCovarPreci` Primitive.
@@ -317,8 +346,8 @@
 - [x] Route Python binding `quat_scale_to_covar_preci_forward` through GPU.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
-- [ ] Run Python manual script after local package reinstall.
-- [ ] Compare against exported CUDA `.npz` reference.
+- [x] Run Python-facing exported `.npz` comparison after local package reinstall.
+- [x] Compare against exported CUDA `.npz` reference for current available fixture.
 
 ## Task 3.11A - Intersect Tile Count MLX Primitive + Metal Kernel
 - [x] Add `gsplat_intersect_tile_count(...)` C++ entry point.
@@ -329,8 +358,8 @@
 - [x] Add C++/Metal smoke coverage for dense AABB tile counts.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
-- [ ] Use tile count primitive inside a future full GPU intersect path.
-- [ ] Add encode/prefix/sort GPU path.
+- [x] Use tile count primitive inside the dense staged GPU intersect path.
+- [x] Add encode/prefix/sort GPU path.
 
 ## Task 3.11B - Intersect Offset MLX Primitive + Metal Kernel
 - [x] Add `GSPlatIntersectOffset` Primitive.
@@ -340,7 +369,7 @@
 - [x] Add C++/Metal smoke coverage for sorted dense AABB `isect_ids`.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
-- [ ] Compare against exported CUDA `.npz` reference.
+- [x] Compare against exported CUDA `.npz` reference.
 
 ## Task 3.11C - Intersect Tile Encode MLX Primitive + Metal Kernel First Pass
 - [x] Add `gsplat_intersect_tile_encode(...)` C++ entry point.
@@ -349,22 +378,22 @@
 - [x] Preserve CPU fallback with dense AABB reference implementation.
 - [x] Accept caller-provided dense exclusive `tile_offsets` and `total_isects`.
 - [x] Generate unsorted `isect_ids` and `flatten_ids` on GPU.
-- [x] Keep Python `intersect_tile_forward` on the existing reference path for now.
+- [x] Initially keep Python `intersect_tile_forward` on the existing reference path.
 - [x] Add C++/Metal smoke coverage for dense AABB encode output.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
 - [x] Confirm existing exported `.npz` parity remains green.
-- [ ] Add GPU prefix sum path for `tile_offsets`.
-- [ ] Add GPU sort/reorder path for `isect_ids` and `flatten_ids`.
-- [ ] Replace full `intersect_tile_forward` with GPU path after prefix/sort are available.
-- [ ] Compare full GPU intersect path against exported CUDA `.npz` reference.
+- [x] Add GPU prefix sum path for `tile_offsets`.
+- [x] Add GPU sort/reorder path for `isect_ids` and `flatten_ids`.
+- [x] Replace full dense `intersect_tile_forward` with GPU path after prefix/sort are available.
+- [x] Compare full dense GPU intersect path against exported CUDA `.npz` reference.
 
 ## Task 3.11D - Intersect Tile GPU Prefix/Sort/Reorder Helper Path
 - [x] Add `gsplat_intersect_tile_offsets(...)` helper using MLX `cumsum(..., inclusive=false)`.
 - [x] Add `gsplat_intersect_tile_sort(...)` helper using MLX `argsort` and `take`.
 - [x] Validate dense GPU exclusive prefix offsets from `tiles_per_gauss`.
 - [x] Validate staged GPU path: count -> prefix -> encode -> sort/reorder.
-- [x] Keep Python `intersect_tile_forward` on the existing reference path for now.
+- [x] Initially keep Python `intersect_tile_forward` on the existing reference path.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
 - [x] Confirm existing exported `.npz` parity remains green.
@@ -456,8 +485,8 @@
 - [ ] `rasterize_to_indices_3dgs_forward(...)`
 
 ## Notes
-- High-level `gsplat.rendering.rasterization` compatibility is not part of the first milestone.
-- End-to-end rendering can be added after the low-level op chain is stable.
+- High-level `gsplat.rendering.rasterization` compatibility is not part of the first dense low-level milestone.
+- End-to-end dense low-level rendering is available; high-level API compatibility remains future work.
 
 ---
 
@@ -484,17 +513,21 @@
 - [x] `scripts/export_ref/export_projection_ewa_3dgs_fused_forward.py`
 - [x] `scripts/export_ref/export_intersect_tile_forward.py`
 - [x] `scripts/export_ref/export_rasterize_to_pixels_3dgs_forward.py`
+- [x] `scripts/export_ref/export_rasterize_to_pixels_3dgs_masks.py`
 - [x] `scripts/export_ref/export_spherical_harmonics_forward.py`
+- [x] `scripts/export_ref/export_spherical_harmonics_degree4_masks.py`
 - [x] `scripts/export_ref/export_quat_scale_to_covar_preci_forward.py`
+- [x] `scripts/export_ref/export_quat_scale_to_covar_preci_edge_cases.py`
 - [x] `scripts/export_ref/export_forward_3dgs_chain.py`
 - [x] `scripts/test/compare_exported_npz.py`
 
 ## Acceptance Criteria
-- [ ] `make env-check` passes.
-- [ ] `make xcode-build` passes.
+- [x] `make env-check` passes.
+- [x] `make xcode-build` passes.
 - [ ] `make pip-develop` succeeds in the conda environment.
-- [ ] Each migrated op imports from `gsplat_core`.
-- [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
+- [x] `make pip-install` succeeds in the conda environment.
+- [x] Each migrated op imports from `gsplat_core`.
+- [x] Each migrated op has a manual script or exported `.npz` comparer for shape, dtype, and parity status.
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 4 and masks.
@@ -512,4 +545,5 @@
 - [x] Existing Python-facing dense `projection_ewa_3dgs_fused_forward` matches exported CUDA `.npz`.
 - [x] Existing Python-facing dense `spherical_harmonics_forward` matches exported CUDA `.npz`.
 - [x] Existing Python-facing dense `quat_scale_to_covar_preci_forward` matches exported CUDA `.npz`.
-- [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
+- [x] Current available exported CUDA `.npz` fixtures pass on the Mac/MLX side.
+- [ ] Direct CUDA/PyTorch parity scripts pass on a CUDA machine.

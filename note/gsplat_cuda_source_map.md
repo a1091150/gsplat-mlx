@@ -32,6 +32,24 @@ do not rely on PyTorch-style `retain_grad()`. Use an explicit dummy trainable
 gradient proxy, such as `viewspace_points`, and make sure it is selected by
 `mx.value_and_grad(..., argnums=...)`.
 
+Current milestone status:
+
+```text
+Done:
+  dense 3DGS forward low-level render path
+  quat/scale -> projection fused dense -> intersect dense -> SH -> rasterize dense
+  rasterize backgrounds and tile masks
+  exported CUDA .npz comparison for current available dense fixtures
+
+Remaining:
+  packed projection
+  packed intersect/rasterize with image_ids and gaussian_ids
+  intersect segmented sort
+  intersect AccuTile/SNUGBOX with conics/opacities
+  rasterize_to_indices_3dgs
+  high-level gsplat-style Python rasterization wrapper
+```
+
 ## Dispatch layers
 
 The gsplat CUDA path has four useful layers:
@@ -117,7 +135,9 @@ gsplat_core/metal/gsplat_quat_scale_to_covar.metal
 Python: quat_scale_to_covar_preci_forward
 ```
 
-Status: not migrated.
+Status: migrated for the dense low-level forward path. The MLX/Metal path
+supports covariance and precision outputs, `triu=true`, `triu=false`, and
+empty optional outputs. Existing exported CUDA `.npz` fixture parity passes.
 
 ### `spherical_harmonics_fwd`
 
@@ -171,7 +191,10 @@ gsplat_core/metal/gsplat_spherical_harmonics.metal
 Python: spherical_harmonics_forward
 ```
 
-Status: not migrated.
+Status: migrated for the dense low-level forward path. The MLX/Metal path
+supports degrees 0 through 4 and optional masks. Existing exported CUDA `.npz`
+fixture parity passes; the degree-4 masks export script is available for an
+additional CUDA fixture.
 
 ### `projection_ewa_3dgs_fused_fwd`
 
@@ -243,8 +266,9 @@ gsplat_core/metal/gsplat_projection.metal
 Python: projection_ewa_3dgs_fused_forward
 ```
 
-Status: partially migrated. Shape, dtype, C++ smoke, and build checks exist.
-Numeric parity with CUDA/PyTorch is pending.
+Status: migrated for the dense fused path. Shape, dtype, C++/Metal smoke,
+edge-case culling checks, and existing exported CUDA `.npz` parity pass.
+The packed projection path remains separate and is not migrated yet.
 
 ### `projection_ewa_3dgs_packed_fwd`
 
@@ -288,7 +312,7 @@ gsplat_core/metal/gsplat_projection_packed.metal
 Python: projection_ewa_3dgs_packed_forward
 ```
 
-Status: not migrated. Defer until fused projection parity is stable.
+Status: not migrated. This is part of the remaining packed-path coverage.
 
 ### `intersect_tile`
 
@@ -355,7 +379,12 @@ gsplat_core/metal/gsplat_intersect.metal
 Python: intersect_tile_forward
 ```
 
-Status: not migrated.
+Status: migrated for the dense AABB path. The implementation uses MLX/Metal
+stages for count, prefix, encode, sort, and reorder, and Python-facing
+`intersect_tile_forward` matches the existing exported CUDA `.npz` fixture.
+
+Remaining coverage: packed inputs with `image_ids`/`gaussian_ids`, segmented
+sort, and the AccuTile/SNUGBOX path that uses `conics` and `opacities`.
 
 ### `intersect_offset`
 
@@ -399,7 +428,8 @@ gsplat_core/metal/gsplat_intersect.metal
 Python: intersect_offset_forward
 ```
 
-Status: not migrated.
+Status: migrated. The MLX/Metal path is used by Python-facing
+`intersect_offset_forward` and by the dense forward chain.
 
 ### `rasterize_to_pixels_3dgs_fwd`
 
@@ -453,7 +483,13 @@ gsplat_core/metal/gsplat_rasterize.metal
 Python: rasterize_to_pixels_3dgs_forward
 ```
 
-Status: not migrated.
+Status: migrated for the dense low-level forward path. The MLX/Metal path
+supports front-to-back compositing, optional backgrounds, and optional tile
+masks. Existing exported CUDA `.npz` fixture parity passes for the base dense
+case; the rasterize masks export script is available for an additional CUDA
+fixture.
+
+Remaining coverage: packed rasterize input layout.
 
 ### `rasterize_to_indices_3dgs`
 
@@ -505,7 +541,8 @@ gsplat_core/metal/gsplat_rasterize_indices.metal
 Python: rasterize_to_indices_3dgs_forward
 ```
 
-Status: not migrated.
+Status: not migrated. This is outside the current dense render-pixels forward
+milestone and remains part of fuller gsplat forward coverage.
 
 ## Excluded source map
 
