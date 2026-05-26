@@ -628,7 +628,7 @@
 ## Proposed Implementation Order
 - [x] Task 6.1: Backward CUDA source map and saved-tensor contract.
 - [x] Task 6.2: Backward API design doc and `.npz` fixture schema.
-- [ ] Task 6.3: Spherical harmonics explicit backward.
+- [x] Task 6.3: Spherical harmonics explicit backward.
 - [ ] Task 6.4: Quat/scale covariance/precision explicit backward.
 - [ ] Task 6.5: Rasterize to pixels 3DGS explicit backward.
 - [ ] Task 6.6: Projection EWA 3DGS fused explicit backward.
@@ -675,3 +675,19 @@
 - [x] Define first CUDA export script names and expected fixture names.
 - [x] Define required fixture keys for SH, quat/scale, rasterize, and projection backward.
 - [x] Lock Task 6.3 to `spherical_harmonics_backward(...)` as the first implementation slice.
+
+## Task 6.3 - Spherical Harmonics Explicit Backward
+- [x] Add `SphericalHarmonicsBackwardInput`.
+- [x] Add explicit C++ entry `gsplat_spherical_harmonics_backward(...)`.
+- [x] Add `GSPlatSphericalHarmonicsBackward` MLX Primitive.
+- [x] Add Metal kernel `gsplat_spherical_harmonics_backward_kernel`.
+- [x] Support degree 0 through 4.
+- [x] Support optional masks.
+- [x] Support `compute_v_dirs=true/false`.
+- [x] Expose Python binding `spherical_harmonics_backward(...)`.
+- [x] Add C++ CPU smoke for degree 1 gradients.
+- [x] Add C++/Metal smoke for degree 4 with masks.
+- [x] Add CUDA export script `scripts/export_ref/export_spherical_harmonics_backward.py`.
+- [x] Extend exported `.npz` compare support for `spherical_harmonics_backward.npz`.
+- [x] Keep CUDA fixture optional until exported from a CUDA machine.
+- [ ] Replace first-version finite-difference `v_dirs` with CUDA-style analytic VJP if tighter parity is required.

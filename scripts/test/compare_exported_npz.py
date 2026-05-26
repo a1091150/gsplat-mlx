@@ -15,6 +15,7 @@ from gsplat_core import (
     projection_ewa_3dgs_fused_forward,
     quat_scale_to_covar_preci_forward,
     rasterize_to_pixels_3dgs_forward,
+    spherical_harmonics_backward,
     spherical_harmonics_forward,
 )
 from parity_utils import compare_array, finish, mx_to_numpy
@@ -147,6 +148,28 @@ def compare_spherical_harmonics(data: np.lib.npyio.NpzFile) -> list[bool]:
     return [compare_array("colors", ref(data, "colors"), mx_to_numpy(actual), atol=1.0e-4, rtol=1.0e-4)]
 
 
+def compare_spherical_harmonics_backward(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "dirs": mx_array(data, "input__dirs"),
+        "coeffs": mx_array(data, "input__coeffs"),
+    }
+    if "input__masks" in data.files:
+        inputs["masks"] = mx_array(data, "input__masks")
+    actual = spherical_harmonics_backward(
+        int(scalar(data, "input__degrees_to_use")),
+        inputs,
+        {"v_colors": mx_array(data, "cotangent__v_colors")},
+        compute_v_dirs=bool(scalar(data, "meta__compute_v_dirs")),
+    )
+    mx.eval(*actual.values())
+    results = [
+        compare_array("v_coeffs", ref(data, "v_coeffs"), mx_to_numpy(actual["v_coeffs"]), atol=1.0e-4, rtol=1.0e-4),
+    ]
+    if "ref__v_dirs" in data.files:
+        results.append(compare_array("v_dirs", ref(data, "v_dirs"), mx_to_numpy(actual["v_dirs"]), atol=1.0e-3, rtol=1.0e-3))
+    return results
+
+
 def compare_quat_scale(data: np.lib.npyio.NpzFile) -> list[bool]:
     compute_covar = bool(scalar(data, "input__compute_covar")) if "input__compute_covar" in data.files else True
     compute_preci = bool(scalar(data, "input__compute_preci")) if "input__compute_preci" in data.files else True
@@ -247,6 +270,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_forward.npz": compare_projection,
     "quat_scale_to_covar_preci_forward.npz": compare_quat_scale,
     "rasterize_to_pixels_3dgs_forward.npz": compare_rasterize,
+    "spherical_harmonics_backward.npz": compare_spherical_harmonics_backward,
     "spherical_harmonics_forward.npz": compare_spherical_harmonics,
 }
 

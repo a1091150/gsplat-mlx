@@ -107,6 +107,76 @@ inline float sh_channel_to_color(uint degree,
   return result;
 }
 
+inline void sh_basis_values(uint degree, float3 dir, thread float* basis) {
+  for (uint i = 0; i < 25; ++i) {
+    basis[i] = 0.0f;
+  }
+  basis[0] = C0;
+  if (degree < 1) {
+    return;
+  }
+
+  float norm = length(dir);
+  if (norm == 0.0f) {
+    return;
+  }
+  float3 n_dir = dir / norm;
+  float x = n_dir.x;
+  float y = n_dir.y;
+  float z = n_dir.z;
+
+  basis[1] = -C1 * y;
+  basis[2] = C1 * z;
+  basis[3] = -C1 * x;
+  if (degree < 2) {
+    return;
+  }
+
+  float z2 = z * z;
+  float f_tmp0_b = -1.092548430592079f * z;
+  float f_c1 = x * x - y * y;
+  float f_s1 = 2.0f * x * y;
+  basis[4] = 0.5462742152960395f * f_s1;
+  basis[5] = f_tmp0_b * y;
+  basis[6] = 0.9461746957575601f * z2 - 0.3153915652525201f;
+  basis[7] = f_tmp0_b * x;
+  basis[8] = 0.5462742152960395f * f_c1;
+  if (degree < 3) {
+    return;
+  }
+
+  float f_tmp0_c = -2.285228997322329f * z2 + 0.4570457994644658f;
+  float f_tmp1_b = 1.445305721320277f * z;
+  float f_c2 = x * f_c1 - y * f_s1;
+  float f_s2 = x * f_s1 + y * f_c1;
+  basis[9] = -0.5900435899266435f * f_s2;
+  basis[10] = f_tmp1_b * f_s1;
+  basis[11] = f_tmp0_c * y;
+  basis[12] = z * (1.865881662950577f * z2 - 1.119528997770346f);
+  basis[13] = f_tmp0_c * x;
+  basis[14] = f_tmp1_b * f_c1;
+  basis[15] = -0.5900435899266435f * f_c2;
+  if (degree < 4) {
+    return;
+  }
+
+  float f_tmp0_d = z * (-4.683325804901025f * z2 + 2.007139630671868f);
+  float f_tmp1_c = 3.31161143515146f * z2 - 0.47308734787878f;
+  float f_tmp2_b = -1.770130769779931f * z;
+  float f_c3 = x * f_c2 - y * f_s2;
+  float f_s3 = x * f_s2 + y * f_c2;
+  basis[16] = 0.6258357354491763f * f_s3;
+  basis[17] = f_tmp2_b * f_s2;
+  basis[18] = f_tmp1_c * f_s1;
+  basis[19] = f_tmp0_d * y;
+  basis[20] =
+      1.984313483298443f * z * basis[12] - 1.006230589874905f * basis[6];
+  basis[21] = f_tmp0_d * x;
+  basis[22] = f_tmp1_c * f_c1;
+  basis[23] = f_tmp2_b * f_c2;
+  basis[24] = 0.6258357354491763f * f_c3;
+}
+
 kernel void gsplat_spherical_harmonics_forward_kernel(
     constant SphericalHarmonicsKernelParams& params [[buffer(0)]],
     const device float* dirs [[buffer(1)]],
@@ -133,4 +203,58 @@ kernel void gsplat_spherical_harmonics_forward_kernel(
       sh_channel_to_color(params.degrees_to_use, 1, dir, elem_coeffs);
   colors[idx * 3 + 2] =
       sh_channel_to_color(params.degrees_to_use, 2, dir, elem_coeffs);
+}
+
+kernel void gsplat_spherical_harmonics_backward_kernel(
+    constant SphericalHarmonicsKernelParams& params [[buffer(0)]],
+    const device float* dirs [[buffer(1)]],
+    const device float* coeffs [[buffer(2)]],
+    const device bool* masks [[buffer(3)]],
+    const device float* v_colors [[buffer(4)]],
+    device float* v_dirs [[buffer(5)]],
+    device float* v_coeffs [[buffer(6)]],
+    constant uint& compute_v_dirs [[buffer(7)]],
+    uint idx [[thread_position_in_grid]]) {
+  if (idx >= params.n) {
+    return;
+  }
+
+  if (params.use_masks != 0 && !masks[idx]) {
+    return;
+  }
+
+  float3 dir = float3(dirs[idx * 3], dirs[idx * 3 + 1], dirs[idx * 3 + 2]);
+  const device float* elem_coeffs = coeffs + idx * params.k * 3;
+  const device float* elem_v_colors = v_colors + idx * 3;
+  device float* elem_v_coeffs = v_coeffs + idx * params.k * 3;
+  uint active_k = (params.degrees_to_use + 1) * (params.degrees_to_use + 1);
+
+  float basis[25];
+  sh_basis_values(params.degrees_to_use, dir, basis);
+  for (uint b = 0; b < active_k; ++b) {
+    elem_v_coeffs[b * 3] = basis[b] * elem_v_colors[0];
+    elem_v_coeffs[b * 3 + 1] = basis[b] * elem_v_colors[1];
+    elem_v_coeffs[b * 3 + 2] = basis[b] * elem_v_colors[2];
+  }
+
+  if (compute_v_dirs == 0) {
+    return;
+  }
+
+  constexpr float eps = 1.0e-3f;
+  for (uint axis = 0; axis < 3; ++axis) {
+    float3 dir_plus = dir;
+    float3 dir_minus = dir;
+    dir_plus[axis] += eps;
+    dir_minus[axis] -= eps;
+    float grad = 0.0f;
+    for (uint channel = 0; channel < 3; ++channel) {
+      float plus = sh_channel_to_color(
+          params.degrees_to_use, channel, dir_plus, elem_coeffs);
+      float minus = sh_channel_to_color(
+          params.degrees_to_use, channel, dir_minus, elem_coeffs);
+      grad += elem_v_colors[channel] * (plus - minus) / (2.0f * eps);
+    }
+    v_dirs[idx * 3 + axis] = grad;
+  }
 }

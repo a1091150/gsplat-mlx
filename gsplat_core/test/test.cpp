@@ -1228,6 +1228,133 @@ void test_spherical_harmonics_forward_gpu_degree4_masks() {
   std::cout << "spherical_harmonics_forward GPU degree4 masks smoke ok\n";
 }
 
+void test_spherical_harmonics_backward_reference() {
+  mx::array dirs({0.0f, 0.0f, 1.0f}, {1, 3}, mx::float32);
+  mx::array coeffs(
+      {1.0f, 2.0f, 3.0f,
+       0.1f, 0.2f, 0.3f,
+       0.4f, 0.5f, 0.6f,
+       0.7f, 0.8f, 0.9f},
+      {1, 4, 3},
+      mx::float32);
+  mx::array v_colors({1.0f, 2.0f, 3.0f}, {1, 3}, mx::float32);
+
+  gsplat_core::SphericalHarmonicsBackwardInput input = {
+      .degrees_to_use = 1,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .v_colors = v_colors,
+      .s = mx::Device::cpu,
+      .use_masks = false,
+      .compute_v_dirs = true,
+  };
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_spherical_harmonics_backward(input);
+  expect(outputs.size() == 2, "SH backward output count mismatch");
+  expect_shape(outputs[gsplat_core::kSHVDirs], {1, 3}, "SH backward v_dirs");
+  expect_shape(outputs[gsplat_core::kSHVCoeffs], {1, 4, 3},
+               "SH backward v_coeffs");
+  mx::eval(outputs);
+
+  constexpr float c0 = 0.2820947917738781f;
+  constexpr float c1 = 0.48860251190292f;
+  const float* v_dirs_data = outputs[gsplat_core::kSHVDirs].data<float>();
+  const float* v_coeffs_data = outputs[gsplat_core::kSHVCoeffs].data<float>();
+  expect_close(v_coeffs_data[0], c0 * 1.0f, 1.0e-6f,
+               "SH backward v_coeffs basis0 red");
+  expect_close(v_coeffs_data[1], c0 * 2.0f, 1.0e-6f,
+               "SH backward v_coeffs basis0 green");
+  expect_close(v_coeffs_data[2], c0 * 3.0f, 1.0e-6f,
+               "SH backward v_coeffs basis0 blue");
+  expect_close(v_coeffs_data[6], c1 * 1.0f, 1.0e-6f,
+               "SH backward v_coeffs basis2 red");
+  expect_close(v_coeffs_data[7], c1 * 2.0f, 1.0e-6f,
+               "SH backward v_coeffs basis2 green");
+  expect_close(v_coeffs_data[8], c1 * 3.0f, 1.0e-6f,
+               "SH backward v_coeffs basis2 blue");
+  expect_close(v_dirs_data[0], -c1 * 5.0f, 5.0e-4f,
+               "SH backward v_dirs x");
+  expect_close(v_dirs_data[1], -c1 * 1.4f, 5.0e-4f,
+               "SH backward v_dirs y");
+  expect_close(v_dirs_data[2], 0.0f, 5.0e-4f,
+               "SH backward v_dirs z");
+
+  input.compute_v_dirs = false;
+  outputs = gsplat_core::gsplat_spherical_harmonics_backward(input);
+  expect_shape(outputs[gsplat_core::kSHVDirs], {0},
+               "SH backward empty v_dirs");
+  expect_shape(outputs[gsplat_core::kSHVCoeffs], {1, 4, 3},
+               "SH backward v_coeffs without dirs");
+
+  std::cout << "spherical_harmonics_backward reference smoke ok\n";
+}
+
+void test_spherical_harmonics_backward_gpu_degree4_masks() {
+  mx::array dirs(
+      {0.25f, -0.5f, 1.0f,
+       -0.75f, 0.1f, 0.6f,
+       0.2f, 0.3f, -0.4f},
+      {3, 3},
+      mx::float32);
+  std::vector<float> coeff_values;
+  coeff_values.reserve(3 * 25 * 3);
+  for (int elem = 0; elem < 3; ++elem) {
+    for (int basis = 0; basis < 25; ++basis) {
+      for (int channel = 0; channel < 3; ++channel) {
+        coeff_values.push_back(
+            0.01f * static_cast<float>(1 + elem * 75 + basis * 3 + channel));
+      }
+    }
+  }
+  mx::array coeffs(coeff_values.data(), {3, 25, 3}, mx::float32);
+  mx::array masks({true, false, true}, {3}, mx::bool_);
+  mx::array v_colors(
+      {0.3f, -0.2f, 0.7f,
+       1.0f, 2.0f, 3.0f,
+       -0.4f, 0.5f, 0.25f},
+      {3, 3},
+      mx::float32);
+
+  gsplat_core::SphericalHarmonicsBackwardInput cpu_input = {
+      .degrees_to_use = 4,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = masks,
+      .v_colors = v_colors,
+      .s = mx::Device::cpu,
+      .use_masks = true,
+      .compute_v_dirs = true,
+  };
+  gsplat_core::SphericalHarmonicsBackwardInput gpu_input = cpu_input;
+  gpu_input.s = mx::Device::gpu;
+  std::vector<mx::array> expected =
+      gsplat_core::gsplat_spherical_harmonics_backward(cpu_input);
+  std::vector<mx::array> actual =
+      gsplat_core::gsplat_spherical_harmonics_backward(gpu_input);
+  mx::eval(expected);
+  mx::eval(actual);
+
+  const float* expected_dirs = expected[gsplat_core::kSHVDirs].data<float>();
+  const float* actual_dirs = actual[gsplat_core::kSHVDirs].data<float>();
+  const float* expected_coeffs = expected[gsplat_core::kSHVCoeffs].data<float>();
+  const float* actual_coeffs = actual[gsplat_core::kSHVCoeffs].data<float>();
+  for (int i = 0; i < 9; ++i) {
+    expect_close(actual_dirs[i], expected_dirs[i], 1.0e-5f,
+                 "SH backward GPU v_dirs");
+  }
+  for (int i = 0; i < 3 * 25 * 3; ++i) {
+    expect_close(actual_coeffs[i], expected_coeffs[i], 1.0e-5f,
+                 "SH backward GPU v_coeffs");
+  }
+  for (int i = 3; i < 6; ++i) {
+    expect_close(actual_dirs[i], 0.0f, 1.0e-6f,
+                 "SH backward GPU masked v_dirs");
+  }
+
+  std::cout << "spherical_harmonics_backward GPU degree4 masks smoke ok\n";
+}
+
 void test_quat_scale_to_covar_preci_reference() {
   mx::array quats(
       {1.0f, 0.0f, 0.0f, 0.0f,
@@ -1600,6 +1727,8 @@ int main() {
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
     test_spherical_harmonics_forward_gpu_degree4_masks();
+    test_spherical_harmonics_backward_reference();
+    test_spherical_harmonics_backward_gpu_degree4_masks();
     test_quat_scale_to_covar_preci_reference();
     test_quat_scale_to_covar_preci_gpu_reference();
     test_quat_scale_to_covar_preci_gpu_full_precision_only();

@@ -228,6 +228,36 @@ mx::array spherical_harmonics_forward(
   return gsplat_core::gsplat_spherical_harmonics_forward(input);
 }
 
+nb::dict spherical_harmonics_backward(
+    int degrees_to_use,
+    const std::unordered_map<std::string, mx::array>& inputs,
+    const std::unordered_map<std::string, mx::array>& cotangents,
+    bool compute_v_dirs) {
+  const auto& dirs = require_key(inputs, "dirs");
+  const auto& coeffs = require_key(inputs, "coeffs");
+  const auto& v_colors = require_key(cotangents, "v_colors");
+  mx::array masks = get_or_empty(inputs, "masks");
+
+  gsplat_core::SphericalHarmonicsBackwardInput input = {
+      .degrees_to_use = degrees_to_use,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = masks,
+      .v_colors = v_colors,
+      .s = mx::Device::gpu,
+      .use_masks = masks.size() != 0,
+      .compute_v_dirs = compute_v_dirs,
+  };
+
+  auto outputs = gsplat_core::gsplat_spherical_harmonics_backward(input);
+  nb::dict result;
+  if (compute_v_dirs) {
+    result["v_dirs"] = outputs[gsplat_core::kSHVDirs];
+  }
+  result["v_coeffs"] = outputs[gsplat_core::kSHVCoeffs];
+  return result;
+}
+
 nb::dict quat_scale_to_covar_preci_forward(
     const std::unordered_map<std::string, mx::array>& inputs,
     bool compute_covar,
@@ -300,6 +330,13 @@ NB_MODULE(_gsplat_core, m) {
       &spherical_harmonics_forward,
       "degrees_to_use"_a,
       "inputs"_a);
+  m.def(
+      "spherical_harmonics_backward",
+      &spherical_harmonics_backward,
+      "degrees_to_use"_a,
+      "inputs"_a,
+      "cotangents"_a,
+      "compute_v_dirs"_a = true);
   m.def(
       "quat_scale_to_covar_preci_forward",
       &quat_scale_to_covar_preci_forward,
