@@ -143,6 +143,7 @@
 - [x] Task 3.5: Quat/scale to covariance/precision forward.
 - [x] Task 3.6: End-to-end 3DGS forward smoke chain.
 - [x] Task 3.7: CUDA/PyTorch parity reference scripts.
+- [x] Task 3.8: CUDA reference `.npz` export scripts.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -241,6 +242,18 @@
 - [ ] Run and record numeric parity on a CUDA machine.
 - [ ] Tune tolerances after first CUDA reference run.
 
+## Task 3.8 - CUDA Reference NPZ Export Scripts
+- [x] Add `scripts/export_ref` for CUDA/Colab-only gsplat reference exports.
+- [x] Add shared export helper `scripts/export_ref/export_utils.py`.
+- [x] Add `.npz` export script for projection fused forward.
+- [x] Add `.npz` export script for intersect tile / offset.
+- [x] Add `.npz` export script for rasterize to pixels 3DGS.
+- [x] Add `.npz` export script for spherical harmonics.
+- [x] Add `.npz` export script for quat/scale covariance/precision.
+- [x] Add `.npz` export script for the end-to-end 3DGS forward chain.
+- [x] Document export usage in `scripts/export_ref/README.md`.
+- [ ] Add Mac/MLX compare scripts that consume exported `.npz` files.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -285,6 +298,12 @@
 - [x] `scripts/test/parity_spherical_harmonics_forward.py`
 - [x] `scripts/test/parity_quat_scale_to_covar_preci_forward.py`
 - [x] `scripts/test/parity_forward_3dgs_chain.py`
+- [x] `scripts/export_ref/export_projection_ewa_3dgs_fused_forward.py`
+- [x] `scripts/export_ref/export_intersect_tile_forward.py`
+- [x] `scripts/export_ref/export_rasterize_to_pixels_3dgs_forward.py`
+- [x] `scripts/export_ref/export_spherical_harmonics_forward.py`
+- [x] `scripts/export_ref/export_quat_scale_to_covar_preci_forward.py`
+- [x] `scripts/export_ref/export_forward_3dgs_chain.py`
 
 ## Acceptance Criteria
 - [ ] `make env-check` passes.
