@@ -42,12 +42,24 @@ enum IntersectTileOutputIndex {
 std::vector<mlx::core::array> gsplat_intersect_tile(
     const IntersectTileInput& input);
 
+std::vector<mlx::core::array> gsplat_intersect_tile_gpu_staged(
+    const IntersectTileInput& input);
+
 mlx::core::array gsplat_intersect_tile_count(const IntersectTileInput& input);
+
+mlx::core::array gsplat_intersect_tile_offsets(
+    const mlx::core::array& tiles_per_gauss,
+    mlx::core::StreamOrDevice s = mlx::core::Device::cpu);
 
 std::vector<mlx::core::array> gsplat_intersect_tile_encode(
     const IntersectTileInput& input,
     const mlx::core::array& tile_offsets,
     int total_isects);
+
+std::vector<mlx::core::array> gsplat_intersect_tile_sort(
+    const mlx::core::array& isect_ids,
+    const mlx::core::array& flatten_ids,
+    mlx::core::StreamOrDevice s = mlx::core::Device::cpu);
 
 mlx::core::array gsplat_intersect_offset(
     const mlx::core::array& isect_ids,

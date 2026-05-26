@@ -149,6 +149,7 @@
 - [x] Task 3.11A: Intersect tile count MLX Primitive + Metal kernel.
 - [x] Task 3.11B: Intersect offset MLX Primitive + Metal kernel.
 - [x] Task 3.11C: Intersect tile encode MLX Primitive + Metal kernel first pass.
+- [x] Task 3.11D: Intersect tile GPU prefix/sort/reorder helper path.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -190,6 +191,9 @@
 - [x] Add `GSPlatIntersectTileEncode` MLX Primitive.
 - [x] Add Metal kernel `gsplat_intersect_tile_encode_kernel`.
 - [x] Validate dense AABB unsorted `isect_ids` and `flatten_ids` generation on GPU.
+- [x] Add GPU exclusive prefix helper for dense `tiles_per_gauss`.
+- [x] Add GPU sort/reorder helper for `isect_ids` and `flatten_ids`.
+- [x] Validate count -> prefix -> encode -> sort/reorder staged GPU path.
 - [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
@@ -337,6 +341,19 @@
 - [ ] Replace full `intersect_tile_forward` with GPU path after prefix/sort are available.
 - [ ] Compare full GPU intersect path against exported CUDA `.npz` reference.
 
+## Task 3.11D - Intersect Tile GPU Prefix/Sort/Reorder Helper Path
+- [x] Add `gsplat_intersect_tile_offsets(...)` helper using MLX `cumsum(..., inclusive=false)`.
+- [x] Add `gsplat_intersect_tile_sort(...)` helper using MLX `argsort` and `take`.
+- [x] Validate dense GPU exclusive prefix offsets from `tiles_per_gauss`.
+- [x] Validate staged GPU path: count -> prefix -> encode -> sort/reorder.
+- [x] Keep Python `intersect_tile_forward` on the existing reference path for now.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [x] Confirm existing exported `.npz` parity remains green.
+- [x] Resolve dynamic `total_isects` output sizing with an eval/read-last staged helper.
+- [ ] Replace full dense `intersect_tile_forward` after dynamic sizing is handled.
+- [ ] Compare full GPU intersect path against exported CUDA `.npz` reference.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -401,4 +418,5 @@
 - [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
 - [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
 - [x] Intersect tile encode C++/Metal smoke validates dense AABB unsorted GPU ids.
+- [x] Intersect tile staged GPU smoke validates prefix, encode, sort, and reorder.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

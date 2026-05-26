@@ -551,6 +551,181 @@ void test_intersect_tile_encode_gpu_dense_aabb() {
   std::cout << "intersect_tile_encode GPU dense AABB smoke ok\n";
 }
 
+void test_intersect_tile_prefix_sort_gpu_dense_aabb() {
+  mx::array means2d(
+      {50.0f, 50.0f, 20.0f, 20.0f, 8.0f, 8.0f},
+      {1, 3, 2},
+      mx::float32);
+  mx::array radii(
+      {5, 5, 10, 10, 0, 0},
+      {1, 3, 2},
+      mx::int32);
+  mx::array depths(
+      {0.5f, 1.0f, 2.0f},
+      {1, 3},
+      mx::float32);
+
+  gsplat_core::IntersectTileInput input = {
+      .means2d = means2d,
+      .radii = radii,
+      .depths = depths,
+      .conics = mx::zeros({0}, mx::float32),
+      .opacities = mx::zeros({0}, mx::float32),
+      .image_ids = mx::zeros({0}, mx::int64),
+      .gaussian_ids = mx::zeros({0}, mx::int64),
+      .s = mx::Device::gpu,
+      .params = {
+          .I = 1,
+          .tile_size = 16,
+          .tile_width = 4,
+          .tile_height = 4,
+          .sort = false,
+          .segmented = false,
+          .packed = false,
+          .use_conics = false,
+          .use_opacities = false,
+      },
+  };
+
+  mx::array counts = gsplat_core::gsplat_intersect_tile_count(input);
+  mx::array offsets =
+      gsplat_core::gsplat_intersect_tile_offsets(counts, mx::Device::gpu);
+  mx::eval(counts, offsets);
+  const int32_t* count_data = counts.data<int32_t>();
+  const int32_t* offset_data = offsets.data<int32_t>();
+  const int total_isects = offset_data[2] + count_data[2];
+  std::vector<mx::array> encoded =
+      gsplat_core::gsplat_intersect_tile_encode(input, offsets, total_isects);
+  std::vector<mx::array> sorted = gsplat_core::gsplat_intersect_tile_sort(
+      encoded[0], encoded[1], mx::Device::gpu);
+  mx::eval(encoded[0], encoded[1], sorted[0], sorted[1]);
+
+  const int32_t expected_offsets[3] = {0, 4, 8};
+  for (int i = 0; i < 3; ++i) {
+    expect(offset_data[i] == expected_offsets[i],
+           "intersect tile prefix offset mismatch at " + std::to_string(i));
+  }
+
+  const int64_t expected_unsorted_isect_ids[8] = {
+      (static_cast<int64_t>(10) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(11) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(14) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(15) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(0) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(1) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(4) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(5) << 32) | 0x3f800000LL,
+  };
+  const int32_t expected_unsorted_flatten_ids[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+  const int64_t* unsorted_isect_data = encoded[0].data<int64_t>();
+  const int32_t* unsorted_flatten_data = encoded[1].data<int32_t>();
+  for (int i = 0; i < 8; ++i) {
+    expect(unsorted_isect_data[i] == expected_unsorted_isect_ids[i],
+           "intersect tile unsorted isect id mismatch at " + std::to_string(i));
+    expect(unsorted_flatten_data[i] == expected_unsorted_flatten_ids[i],
+           "intersect tile unsorted flatten id mismatch at " +
+               std::to_string(i));
+  }
+
+  const int64_t expected_sorted_isect_ids[8] = {
+      (static_cast<int64_t>(0) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(1) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(4) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(5) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(10) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(11) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(14) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(15) << 32) | 0x3f000000LL,
+  };
+  const int32_t expected_sorted_flatten_ids[8] = {1, 1, 1, 1, 0, 0, 0, 0};
+  const int64_t* sorted_isect_data = sorted[0].data<int64_t>();
+  const int32_t* sorted_flatten_data = sorted[1].data<int32_t>();
+  for (int i = 0; i < 8; ++i) {
+    expect(sorted_isect_data[i] == expected_sorted_isect_ids[i],
+           "intersect tile sorted isect id mismatch at " + std::to_string(i));
+    expect(sorted_flatten_data[i] == expected_sorted_flatten_ids[i],
+           "intersect tile sorted flatten id mismatch at " + std::to_string(i));
+  }
+
+  std::cout << "intersect_tile prefix/sort GPU dense AABB smoke ok\n";
+}
+
+void test_intersect_tile_gpu_staged_dynamic_total_dense_aabb() {
+  mx::array means2d(
+      {50.0f, 50.0f, 20.0f, 20.0f, 8.0f, 8.0f},
+      {1, 3, 2},
+      mx::float32);
+  mx::array radii(
+      {5, 5, 10, 10, 0, 0},
+      {1, 3, 2},
+      mx::int32);
+  mx::array depths(
+      {0.5f, 1.0f, 2.0f},
+      {1, 3},
+      mx::float32);
+
+  gsplat_core::IntersectTileInput input = {
+      .means2d = means2d,
+      .radii = radii,
+      .depths = depths,
+      .conics = mx::zeros({0}, mx::float32),
+      .opacities = mx::zeros({0}, mx::float32),
+      .image_ids = mx::zeros({0}, mx::int64),
+      .gaussian_ids = mx::zeros({0}, mx::int64),
+      .s = mx::Device::gpu,
+      .params = {
+          .I = 1,
+          .tile_size = 16,
+          .tile_width = 4,
+          .tile_height = 4,
+          .sort = true,
+          .segmented = false,
+          .packed = false,
+          .use_conics = false,
+          .use_opacities = false,
+      },
+  };
+
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_intersect_tile_gpu_staged(input);
+  expect(outputs.size() == 3, "intersect tile gpu staged output count mismatch");
+  expect_shape(outputs[0], {1, 3}, "intersect tile gpu staged counts");
+  expect_shape(outputs[1], {8}, "intersect tile gpu staged isect ids");
+  expect_shape(outputs[2], {8}, "intersect tile gpu staged flatten ids");
+  mx::eval(outputs[0], outputs[1], outputs[2]);
+
+  const int32_t expected_counts[3] = {4, 4, 0};
+  const int32_t* count_data = outputs[0].data<int32_t>();
+  for (int i = 0; i < 3; ++i) {
+    expect(count_data[i] == expected_counts[i],
+           "intersect tile gpu staged count mismatch at " + std::to_string(i));
+  }
+
+  const int64_t expected_sorted_isect_ids[8] = {
+      (static_cast<int64_t>(0) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(1) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(4) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(5) << 32) | 0x3f800000LL,
+      (static_cast<int64_t>(10) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(11) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(14) << 32) | 0x3f000000LL,
+      (static_cast<int64_t>(15) << 32) | 0x3f000000LL,
+  };
+  const int32_t expected_sorted_flatten_ids[8] = {1, 1, 1, 1, 0, 0, 0, 0};
+  const int64_t* isect_data = outputs[1].data<int64_t>();
+  const int32_t* flatten_data = outputs[2].data<int32_t>();
+  for (int i = 0; i < 8; ++i) {
+    expect(isect_data[i] == expected_sorted_isect_ids[i],
+           "intersect tile gpu staged isect id mismatch at " +
+               std::to_string(i));
+    expect(flatten_data[i] == expected_sorted_flatten_ids[i],
+           "intersect tile gpu staged flatten id mismatch at " +
+               std::to_string(i));
+  }
+
+  std::cout << "intersect_tile staged GPU dynamic total smoke ok\n";
+}
+
 void test_intersect_offset_gpu_dense_aabb() {
   mx::array isect_ids(
       {
@@ -1091,6 +1266,8 @@ int main() {
     test_intersect_tile_and_offset_dense_aabb();
     test_intersect_tile_count_gpu_dense_aabb();
     test_intersect_tile_encode_gpu_dense_aabb();
+    test_intersect_tile_prefix_sort_gpu_dense_aabb();
+    test_intersect_tile_gpu_staged_dynamic_total_dense_aabb();
     test_intersect_offset_gpu_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();

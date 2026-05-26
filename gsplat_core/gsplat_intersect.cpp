@@ -152,6 +152,23 @@ mx::Shape scalar_shape_from_depths(const mx::array& depths) {
   return shape;
 }
 
+int read_total_isects(const mx::array& tiles_per_gauss,
+                      const mx::array& tile_offsets) {
+  mx::eval(tiles_per_gauss, tile_offsets);
+  if (tiles_per_gauss.size() == 0) {
+    return 0;
+  }
+  if (tiles_per_gauss.dtype().val() != mx::int32.val() ||
+      tile_offsets.dtype().val() != mx::int32.val() ||
+      tiles_per_gauss.size() != tile_offsets.size()) {
+    throw std::runtime_error(
+        "read_total_isects expects matching int32 count and offset arrays.");
+  }
+  const int last = static_cast<int>(tiles_per_gauss.size()) - 1;
+  return tile_offsets.data<int32_t>()[last] +
+         tiles_per_gauss.data<int32_t>()[last];
+}
+
 }  // namespace
 
 mx::array gsplat_intersect_tile_count(const IntersectTileInput& input) {
@@ -174,6 +191,23 @@ mx::array gsplat_intersect_tile_count(const IntersectTileInput& input) {
       mx::contiguous(input.depths),
   };
   return mx::array(scalar_shape_from_depths(input.depths), mx::int32, prim, inputs);
+}
+
+mx::array gsplat_intersect_tile_offsets(const mx::array& tiles_per_gauss,
+                                        mx::StreamOrDevice s) {
+  if (tiles_per_gauss.dtype().val() != mx::int32.val()) {
+    throw std::runtime_error(
+        "intersect_tile_offsets expects int32 tiles_per_gauss.");
+  }
+  mx::Shape shape;
+  shape.reserve(tiles_per_gauss.ndim());
+  for (int i = 0; i < static_cast<int>(tiles_per_gauss.ndim()); ++i) {
+    shape.push_back(tiles_per_gauss.shape(i));
+  }
+  mx::array flat_counts =
+      mx::reshape(mx::contiguous(tiles_per_gauss), {static_cast<int>(tiles_per_gauss.size())}, s);
+  mx::array flat_offsets = mx::cumsum(flat_counts, false, false, s);
+  return mx::reshape(flat_offsets, shape, s);
 }
 
 std::vector<mx::array> gsplat_intersect_tile_encode(
@@ -227,6 +261,44 @@ std::vector<mx::array> gsplat_intersect_tile_encode(
       {mx::int64, mx::int32},
       prim,
       inputs);
+}
+
+std::vector<mx::array> gsplat_intersect_tile_sort(
+    const mx::array& isect_ids,
+    const mx::array& flatten_ids,
+    mx::StreamOrDevice s) {
+  if (isect_ids.dtype().val() != mx::int64.val()) {
+    throw std::runtime_error("intersect_tile_sort expects int64 isect_ids.");
+  }
+  if (flatten_ids.dtype().val() != mx::int32.val()) {
+    throw std::runtime_error("intersect_tile_sort expects int32 flatten_ids.");
+  }
+  if (isect_ids.ndim() != 1 || flatten_ids.ndim() != 1 ||
+      isect_ids.size() != flatten_ids.size()) {
+    throw std::runtime_error(
+        "intersect_tile_sort expects matching 1D isect_ids and flatten_ids.");
+  }
+
+  mx::array order = mx::argsort(mx::contiguous(isect_ids), s);
+  mx::array sorted_isect_ids = mx::take(isect_ids, order, s);
+  mx::array sorted_flatten_ids = mx::take(flatten_ids, order, s);
+  return {sorted_isect_ids, sorted_flatten_ids};
+}
+
+std::vector<mx::array> gsplat_intersect_tile_gpu_staged(
+    const IntersectTileInput& input) {
+  mx::array tiles_per_gauss = gsplat_intersect_tile_count(input);
+  mx::array tile_offsets =
+      gsplat_intersect_tile_offsets(tiles_per_gauss, input.s);
+  const int total_isects = read_total_isects(tiles_per_gauss, tile_offsets);
+  std::vector<mx::array> encoded =
+      gsplat_intersect_tile_encode(input, tile_offsets, total_isects);
+  if (!input.params.sort) {
+    return {tiles_per_gauss, encoded[0], encoded[1]};
+  }
+  std::vector<mx::array> sorted =
+      gsplat_intersect_tile_sort(encoded[0], encoded[1], input.s);
+  return {tiles_per_gauss, sorted[0], sorted[1]};
 }
 
 std::vector<mx::array> gsplat_intersect_tile(const IntersectTileInput& input) {
