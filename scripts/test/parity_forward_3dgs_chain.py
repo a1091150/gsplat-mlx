@@ -81,6 +81,8 @@ def main() -> None:
     dirs_t = torch.tensor([[[[0.0, 0.0, 1.0]]]], device="cuda", dtype=torch.float32)
     coeffs_t = torch.tensor([[[[[1.0 / c0, 0.0, 0.0]]]]], device="cuda", dtype=torch.float32)
     colors_t = gsplat.spherical_harmonics(0, dirs_t, coeffs_t)
+    backgrounds_t = torch.zeros((1, 3), device="cuda", dtype=torch.float32)
+    gsplat_backgrounds_t = backgrounds_t[:, None, :]
     colors_ref, alphas_ref = gsplat.rasterize_to_pixels(
         means2d_t,
         conics_t,
@@ -91,7 +93,7 @@ def main() -> None:
         tile_size=tile_size,
         isect_offsets=offsets_t,
         flatten_ids=flatten_ids_t,
-        backgrounds=torch.zeros((1, 3), device="cuda", dtype=torch.float32),
+        backgrounds=gsplat_backgrounds_t,
         masks=None,
         packed=False,
         absgrad=False,
@@ -141,7 +143,7 @@ def main() -> None:
             "conics": projection["conics"],
             "colors": colors,
             "opacities": torch_to_mx(raster_opacities_t),
-            "backgrounds": mx.zeros((1, 3), dtype=mx.float32),
+            "backgrounds": torch_to_mx(backgrounds_t),
             "tile_offsets": offsets,
             "flatten_ids": intersections["flatten_ids"],
         },
