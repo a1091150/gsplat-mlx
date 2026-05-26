@@ -369,7 +369,7 @@ void test_intersect_tile_and_offset_dense_aabb() {
       .opacities = mx::zeros({0}, mx::float32),
       .image_ids = mx::zeros({0}, mx::int64),
       .gaussian_ids = mx::zeros({0}, mx::int64),
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .params = {
           .I = 1,
           .tile_size = 16,
@@ -1176,7 +1176,7 @@ void test_3dgs_forward_chain_smoke() {
       .opacities = mx::zeros({0}, mx::float32),
       .image_ids = mx::zeros({0}, mx::int64),
       .gaussian_ids = mx::zeros({0}, mx::int64),
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .params = {
           .I = 1,
           .tile_size = tile_size,
@@ -1199,7 +1199,7 @@ void test_3dgs_forward_chain_smoke() {
       1,
       tile_width,
       tile_height,
-      mx::Device::cpu);
+      mx::Device::gpu);
   expect_shape(tile_offsets, {1, tile_height, tile_width},
                "chain tile offsets");
 

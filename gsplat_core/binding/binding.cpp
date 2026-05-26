@@ -137,7 +137,7 @@ nb::dict intersect_tile_forward(
       .opacities = opacities,
       .image_ids = image_ids,
       .gaussian_ids = gaussian_ids,
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .params = {
           .I = I,
           .tile_size = tile_size,

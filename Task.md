@@ -150,6 +150,7 @@
 - [x] Task 3.11B: Intersect offset MLX Primitive + Metal kernel.
 - [x] Task 3.11C: Intersect tile encode MLX Primitive + Metal kernel first pass.
 - [x] Task 3.11D: Intersect tile GPU prefix/sort/reorder helper path.
+- [x] Task 3.11E: Replace dense intersect tile forward with staged GPU path.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -194,7 +195,7 @@
 - [x] Add GPU exclusive prefix helper for dense `tiles_per_gauss`.
 - [x] Add GPU sort/reorder helper for `isect_ids` and `flatten_ids`.
 - [x] Validate count -> prefix -> encode -> sort/reorder staged GPU path.
-- [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
+- [x] Move dense intersect tile counting/encoding from C++ reference path to staged GPU path.
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
 - [ ] Support segmented sort.
@@ -307,7 +308,7 @@
 - [x] Add `GSPlatIntersectTileCount` Primitive.
 - [x] Add Metal kernel `gsplat_intersect_tile_count_kernel`.
 - [x] Support dense AABB count path for `means2d [..., N, 2]`, `radii [..., N, 2]`, and `depths [..., N]`.
-- [x] Keep full `intersect_tile_forward` on the C++ reference path for `isect_ids` and `flatten_ids`.
+- [x] First keep full `intersect_tile_forward` on the C++ reference path for `isect_ids` and `flatten_ids`.
 - [x] Add C++/Metal smoke coverage for dense AABB tile counts.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
@@ -351,8 +352,18 @@
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
 - [x] Confirm existing exported `.npz` parity remains green.
 - [x] Resolve dynamic `total_isects` output sizing with an eval/read-last staged helper.
-- [ ] Replace full dense `intersect_tile_forward` after dynamic sizing is handled.
-- [ ] Compare full GPU intersect path against exported CUDA `.npz` reference.
+- [x] Replace full dense `intersect_tile_forward` after dynamic sizing is handled.
+- [x] Compare full GPU intersect path against exported CUDA `.npz` reference.
+
+## Task 3.11E - Replace Dense Intersect Tile Forward With Staged GPU Path
+- [x] Route `gsplat_intersect_tile(...)` through `gsplat_intersect_tile_gpu_staged(...)`.
+- [x] Route Python binding `intersect_tile_forward` through GPU.
+- [x] Keep dense validation and unsupported packed/segmented/AccuTile checks.
+- [x] Preserve `sort=true` and `sort=false` behavior through the staged path.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [x] Reinstall package with `make pip-install`.
+- [x] Validate exported `.npz` parity for Python-facing `intersect_tile_forward`.
 
 ---
 
@@ -419,4 +430,5 @@
 - [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
 - [x] Intersect tile encode C++/Metal smoke validates dense AABB unsorted GPU ids.
 - [x] Intersect tile staged GPU smoke validates prefix, encode, sort, and reorder.
+- [x] Python-facing dense `intersect_tile_forward` matches exported CUDA `.npz` through staged GPU path.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
