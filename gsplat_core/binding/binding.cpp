@@ -222,7 +222,7 @@ mx::array spherical_harmonics_forward(
       .dirs = dirs,
       .coeffs = coeffs,
       .masks = masks,
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .use_masks = masks.size() != 0,
   };
   return gsplat_core::gsplat_spherical_harmonics_forward(input);

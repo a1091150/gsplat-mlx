@@ -144,6 +144,7 @@
 - [x] Task 3.6: End-to-end 3DGS forward smoke chain.
 - [x] Task 3.7: CUDA/PyTorch parity reference scripts.
 - [x] Task 3.8: CUDA reference `.npz` export scripts.
+- [x] Task 3.9: Spherical harmonics MLX Primitive + Metal kernel.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -204,7 +205,9 @@
 - [x] Support degree 0 through degree 4 SH basis evaluation.
 - [x] Support optional masks with deterministic zero output for masked entries.
 - [x] Add C++ smoke coverage for degree 0, degree 1, and masks.
-- [ ] Move spherical harmonics from C++ reference path to Metal kernels.
+- [x] Move spherical harmonics from C++ reference path to MLX Primitive + Metal kernel.
+- [x] Keep CPU reference path as fallback.
+- [x] Add C++/Metal GPU smoke coverage for degree 1 and masks.
 - [ ] CUDA/PyTorch numeric parity.
 
 ## Task 3.5 - Quat/Scale To Covariance/Precision Forward
@@ -253,6 +256,18 @@
 - [x] Add `.npz` export script for the end-to-end 3DGS forward chain.
 - [x] Document export usage in `scripts/export_ref/README.md`.
 - [ ] Add Mac/MLX compare scripts that consume exported `.npz` files.
+
+## Task 3.9 - Spherical Harmonics MLX Primitive + Metal Kernel
+- [x] Add `GSPlatSphericalHarmonics` Primitive.
+- [x] Add Metal kernel `gsplat_spherical_harmonics_forward_kernel`.
+- [x] Preserve the CPU reference implementation in `eval_cpu`.
+- [x] Support degree 0 through degree 4 on GPU.
+- [x] Support optional masks on GPU.
+- [x] Route Python binding `spherical_harmonics_forward` through GPU.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [ ] Run Python manual script after local package reinstall.
+- [ ] Compare against exported CUDA `.npz` reference.
 
 ---
 
@@ -312,4 +327,5 @@
 - [ ] Each migrated op imports from `gsplat_core`.
 - [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
+- [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

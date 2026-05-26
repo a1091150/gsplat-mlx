@@ -576,6 +576,55 @@ void test_spherical_harmonics_forward_reference() {
   std::cout << "spherical_harmonics_forward reference smoke ok\n";
 }
 
+void test_spherical_harmonics_forward_gpu_reference() {
+  mx::array dirs(
+      {0.0f, 0.0f, 1.0f,
+       1.0f, 0.0f, 0.0f},
+      {2, 3},
+      mx::float32);
+  mx::array coeffs(
+      {1.0f, 2.0f, 3.0f,
+       0.1f, 0.2f, 0.3f,
+       0.4f, 0.5f, 0.6f,
+       0.7f, 0.8f, 0.9f,
+       4.0f, 5.0f, 6.0f,
+       0.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 0.0f},
+      {2, 4, 3},
+      mx::float32);
+  mx::array masks({true, false}, {2}, mx::bool_);
+
+  gsplat_core::SphericalHarmonicsInput input = {
+      .degrees_to_use = 1,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = masks,
+      .s = mx::Device::gpu,
+      .use_masks = true,
+  };
+  mx::array colors =
+      gsplat_core::gsplat_spherical_harmonics_forward(input);
+  expect_shape(colors, {2, 3}, "spherical_harmonics gpu colors");
+  expect_dtype(colors, mx::float32, "spherical_harmonics gpu colors");
+  colors.eval();
+
+  constexpr float c0 = 0.2820947917738781f;
+  constexpr float c1 = 0.48860251190292f;
+  const float* data = colors.data<float>();
+  expect_close(data[0], c0 * 1.0f + c1 * 0.4f, 1.0e-6f,
+               "SH GPU degree1 masked red");
+  expect_close(data[1], c0 * 2.0f + c1 * 0.5f, 1.0e-6f,
+               "SH GPU degree1 masked green");
+  expect_close(data[2], c0 * 3.0f + c1 * 0.6f, 1.0e-6f,
+               "SH GPU degree1 masked blue");
+  expect_close(data[3], 0.0f, 1.0e-6f, "SH GPU masked red");
+  expect_close(data[4], 0.0f, 1.0e-6f, "SH GPU masked green");
+  expect_close(data[5], 0.0f, 1.0e-6f, "SH GPU masked blue");
+
+  std::cout << "spherical_harmonics_forward GPU reference smoke ok\n";
+}
+
 void test_quat_scale_to_covar_preci_reference() {
   mx::array quats(
       {1.0f, 0.0f, 0.0f, 0.0f,
@@ -819,6 +868,7 @@ int main() {
     test_intersect_tile_and_offset_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();
+    test_spherical_harmonics_forward_gpu_reference();
     test_quat_scale_to_covar_preci_reference();
     test_3dgs_forward_chain_smoke();
     std::cout << "gsplat_core C++ smoke tests passed\n";

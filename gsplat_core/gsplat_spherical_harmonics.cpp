@@ -1,17 +1,33 @@
 #include "include/gsplat_spherical_harmonics.h"
 
+#include "include/helper.h"
+
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
-#include "mlx/mlx.h"
-#include "mlx/ops.h"
+#include "mlx/backend/common/utils.h"
+#include "mlx/backend/cpu/encoder.h"
+#include "mlx/utils.h"
+
+#ifdef _METAL_
+#include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/utils.h"
+#endif
 
 namespace gsplat_core {
 namespace {
 
 constexpr float kC0 = 0.2820947917738781f;
 constexpr float kC1 = 0.48860251190292f;
+
+struct SphericalHarmonicsKernelParams {
+  uint32_t n;
+  uint32_t k;
+  uint32_t degrees_to_use;
+  uint32_t use_masks;
+};
 
 mx::Shape dirs_shape(const mx::array& dirs) {
   mx::Shape shape;
@@ -25,6 +41,11 @@ mx::Shape dirs_shape(const mx::array& dirs) {
 void validate_input(const SphericalHarmonicsInput& input) {
   if (input.degrees_to_use < 0 || input.degrees_to_use > 4) {
     throw std::runtime_error("spherical_harmonics_forward supports degree 0..4.");
+  }
+  if (input.dirs.dtype().val() != mx::float32.val() ||
+      input.coeffs.dtype().val() != mx::float32.val()) {
+    throw std::runtime_error(
+        "spherical_harmonics_forward currently supports float32 dirs and coeffs.");
   }
   if (input.dirs.ndim() < 1 ||
       input.dirs.shape(static_cast<int>(input.dirs.ndim()) - 1) != 3) {
@@ -44,6 +65,9 @@ void validate_input(const SphericalHarmonicsInput& input) {
   if (input.coeffs.size() / (k * 3) != input.dirs.size() / 3) {
     throw std::runtime_error(
         "dirs and coeffs prefix dimensions must have the same size.");
+  }
+  if (input.use_masks && input.masks.size() != input.dirs.size() / 3) {
+    throw std::runtime_error("masks must have shape matching dirs prefix dims.");
   }
 }
 
@@ -152,19 +176,35 @@ mx::array gsplat_spherical_harmonics_forward(
     const SphericalHarmonicsInput& input) {
   validate_input(input);
 
-  mx::array dirs = mx::contiguous(input.dirs);
-  mx::array coeffs = mx::contiguous(input.coeffs);
-  mx::array masks = mx::contiguous(input.masks);
+  auto prim = std::make_shared<GSPlatSphericalHarmonics>(
+      to_stream(input.s), input.degrees_to_use, input.use_masks);
+  std::vector<mx::array> inputs = {
+      mx::contiguous(input.dirs),
+      mx::contiguous(input.coeffs),
+      mx::contiguous(input.masks),
+  };
+  return mx::array(dirs_shape(input.dirs), mx::float32, prim, inputs);
+}
+
+void GSPlatSphericalHarmonics::eval_cpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  const auto& dirs = inputs[0];
+  const auto& coeffs = inputs[1];
+  const auto& masks = inputs[2];
   mx::eval(dirs, coeffs, masks);
+
+  auto& colors = outputs[0];
+  colors.set_data(mx::allocator::malloc(colors.nbytes()));
+  std::memset(colors.data<void>(), 0, colors.nbytes());
 
   const int k = coeffs.shape(static_cast<int>(coeffs.ndim()) - 2);
   const int n = static_cast<int>(dirs.size() / 3);
   const float* dirs_data = dirs.data<float>();
   const float* coeffs_data = coeffs.data<float>();
-  const bool* masks_data =
-      input.use_masks ? masks.data<bool>() : nullptr;
+  const bool* masks_data = use_masks_ ? masks.data<bool>() : nullptr;
+  float* colors_data = colors.data<float>();
 
-  std::vector<float> colors(static_cast<size_t>(n * 3), 0.0f);
   for (int elem = 0; elem < n; ++elem) {
     if (masks_data != nullptr && !masks_data[elem]) {
       continue;
@@ -172,8 +212,8 @@ mx::array gsplat_spherical_harmonics_forward(
     const float* dir = dirs_data + elem * 3;
     const float* elem_coeffs = coeffs_data + elem * k * 3;
     for (int channel = 0; channel < 3; ++channel) {
-      colors[static_cast<size_t>(elem * 3 + channel)] =
-          sh_channel_to_color(input.degrees_to_use,
+      colors_data[elem * 3 + channel] =
+          sh_channel_to_color(degrees_to_use_,
                               channel,
                               dir[0],
                               dir[1],
@@ -181,8 +221,93 @@ mx::array gsplat_spherical_harmonics_forward(
                               elem_coeffs);
     }
   }
+}
 
-  return mx::array(colors.begin(), dirs_shape(dirs), mx::float32);
+#ifdef _METAL_
+void GSPlatSphericalHarmonics::eval_gpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  auto& colors = outputs[0];
+  colors.set_data(mx::allocator::malloc(colors.nbytes()));
+  std::memset(colors.data<void>(), 0, colors.nbytes());
+
+  const auto& dirs = inputs[0];
+  const auto& coeffs = inputs[1];
+  const auto& masks = inputs[2];
+  const uint32_t n = static_cast<uint32_t>(dirs.size() / 3);
+  if (n == 0) {
+    return;
+  }
+
+  SphericalHarmonicsKernelParams kernel_params = {
+      .n = n,
+      .k = static_cast<uint32_t>(
+          coeffs.shape(static_cast<int>(coeffs.ndim()) - 2)),
+      .degrees_to_use = static_cast<uint32_t>(degrees_to_use_),
+      .use_masks = static_cast<uint32_t>(use_masks_),
+  };
+
+  auto& s = stream();
+  auto& d = mx::metal::device(s.device);
+  auto lib = d.get_library("gsplat_core", current_binary_dir());
+  auto kernel = d.get_kernel("gsplat_spherical_harmonics_forward_kernel", lib);
+
+  auto& compute_encoder = d.get_command_encoder(s.index);
+  compute_encoder.set_compute_pipeline_state(kernel);
+  compute_encoder.set_bytes(kernel_params, 0);
+  compute_encoder.set_input_array(dirs, 1);
+  compute_encoder.set_input_array(coeffs, 2);
+  compute_encoder.set_input_array(masks, 3);
+  compute_encoder.set_output_array(colors, 4);
+
+  const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
+  const size_t tgp_size = std::min(static_cast<size_t>(n), max_threads);
+  MTL::Size group_size = MTL::Size(tgp_size, 1, 1);
+  MTL::Size grid_size = MTL::Size(n, 1, 1);
+  compute_encoder.dispatch_threads(grid_size, group_size);
+}
+#else
+void GSPlatSphericalHarmonics::eval_gpu(
+    const std::vector<mx::array>&,
+    std::vector<mx::array>&) {
+  throw std::runtime_error(
+      "GSPlatSphericalHarmonics has no GPU implementation.");
+}
+#endif
+
+std::vector<mx::array> GSPlatSphericalHarmonics::jvp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&) {
+  throw std::runtime_error("GSPlatSphericalHarmonics jvp is not implemented.");
+}
+
+std::vector<mx::array> GSPlatSphericalHarmonics::vjp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&,
+    const std::vector<mx::array>&) {
+  throw std::runtime_error("GSPlatSphericalHarmonics vjp is not implemented.");
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+GSPlatSphericalHarmonics::vmap(const std::vector<mx::array>&,
+                               const std::vector<int>&) {
+  throw std::runtime_error("GSPlatSphericalHarmonics vmap is not implemented.");
+}
+
+bool GSPlatSphericalHarmonics::is_equivalent(
+    const mx::Primitive& other) const {
+  if (name() != other.name()) {
+    return false;
+  }
+  const auto* other_ptr =
+      dynamic_cast<const GSPlatSphericalHarmonics*>(&other);
+  if (!other_ptr) {
+    return false;
+  }
+  return degrees_to_use_ == other_ptr->degrees_to_use_ &&
+         use_masks_ == other_ptr->use_masks_;
 }
 
 }  // namespace gsplat_core
