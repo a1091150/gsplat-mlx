@@ -96,7 +96,7 @@
 ## 3DGS Forward Ops
 - [ ] `quat_scale_to_covar_preci_fwd`
 - [ ] `spherical_harmonics_fwd`
-- [ ] `projection_ewa_3dgs_fused_fwd`
+- [x] `projection_ewa_3dgs_fused_fwd`
 - [ ] `projection_ewa_3dgs_packed_fwd`
 - [ ] `intersect_tile`
 - [ ] `intersect_offset`
@@ -122,7 +122,7 @@
 - Keep APIs close to gsplat CUDA op semantics while using MLX arrays.
 
 ## Planned Subtasks
-- [ ] Task 3.1: Projection 3DGS forward.
+- [x] Task 3.1: Projection 3DGS fused forward.
 - [ ] Task 3.2: Intersect tile / intersect offset forward.
 - [ ] Task 3.3: Rasterize to pixels 3DGS forward.
 - [ ] Task 3.4: Spherical harmonics forward.
@@ -135,6 +135,17 @@
 - CPU fallback may throw or return zero-filled placeholders until a CPU path is explicitly needed.
 - GPU path is the source of truth for migrated behavior.
 
+## Task 3.1 - Projection 3DGS Fused Forward
+- [x] Add `gsplat_core/include/gsplat_projection.h`.
+- [x] Add `gsplat_core/gsplat_projection.cpp`.
+- [x] Add `gsplat_core/metal/gsplat_projection.metal`.
+- [x] Expose `projection_ewa_3dgs_fused_forward(...)` from `_gsplat_core`.
+- [x] Support covars path or quats/scales path.
+- [x] Support optional opacities and optional compensations output.
+- [x] Build through `make xcode-build`.
+- [ ] CUDA/PyTorch numeric parity.
+- [ ] Packed projection forward.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -146,7 +157,7 @@
 ## Planned APIs
 - [ ] `quat_scale_to_covar_preci_forward(...)`
 - [ ] `spherical_harmonics_forward(...)`
-- [ ] `projection_ewa_3dgs_fused_forward(...)`
+- [x] `projection_ewa_3dgs_fused_forward(...)`
 - [ ] `projection_ewa_3dgs_packed_forward(...)`
 - [ ] `intersect_tile_forward(...)`
 - [ ] `intersect_offset_forward(...)`
@@ -167,7 +178,7 @@
 - Compare against gsplat CUDA/PyTorch references when the local environment supports it.
 
 ## Planned Scripts
-- [ ] `scripts/test/projection_ewa_3dgs_fused_forward.py`
+- [x] `scripts/test/projection_ewa_3dgs_fused_forward.py`
 - [ ] `scripts/test/intersect_tile_forward.py`
 - [ ] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
 - [ ] `scripts/test/spherical_harmonics_forward.py`
