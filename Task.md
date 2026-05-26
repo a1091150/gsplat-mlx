@@ -108,7 +108,7 @@
 - `submodules/gsplat/gsplat/cuda/csrc/RasterizeToIndices3DGS.cu`
 
 ## 3DGS Forward Ops
-- [ ] `quat_scale_to_covar_preci_fwd`
+- [x] `quat_scale_to_covar_preci_fwd`
 - [x] `spherical_harmonics_fwd`
 - [x] `projection_ewa_3dgs_fused_fwd`
 - [ ] `projection_ewa_3dgs_packed_fwd`
@@ -140,7 +140,7 @@
 - [x] Task 3.2: Intersect tile / intersect offset forward.
 - [x] Task 3.3: Rasterize to pixels 3DGS forward.
 - [x] Task 3.4: Spherical harmonics forward.
-- [ ] Task 3.5: Quat/scale to covariance/precision forward.
+- [x] Task 3.5: Quat/scale to covariance/precision forward.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -204,6 +204,19 @@
 - [ ] Move spherical harmonics from C++ reference path to Metal kernels.
 - [ ] CUDA/PyTorch numeric parity.
 
+## Task 3.5 - Quat/Scale To Covariance/Precision Forward
+- [x] Add `gsplat_core/include/gsplat_quat_scale_to_covar.h`.
+- [x] Add `gsplat_core/gsplat_quat_scale_to_covar.cpp`.
+- [x] Add `gsplat_core/metal/gsplat_quat_scale_to_covar.metal`.
+- [x] Expose `quat_scale_to_covar_preci_forward(...)` from `_gsplat_core`.
+- [x] Support dense first-version C++ reference path.
+- [x] Support `compute_covar` and `compute_preci`.
+- [x] Support `triu=true` output order `[00, 01, 02, 11, 12, 22]`.
+- [x] Support `triu=false` full `3x3` row-major output.
+- [x] Add C++ smoke coverage for identity quats, non-unit quats, covariance, precision, and empty optional outputs.
+- [ ] Move quat/scale covariance from C++ reference path to Metal kernels.
+- [ ] CUDA/PyTorch numeric parity.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -213,7 +226,7 @@
 - Keep Python API names close to gsplat CUDA op names, with `_forward` suffixes where useful for clarity.
 
 ## Planned APIs
-- [ ] `quat_scale_to_covar_preci_forward(...)`
+- [x] `quat_scale_to_covar_preci_forward(...)`
 - [x] `spherical_harmonics_forward(...)`
 - [x] `projection_ewa_3dgs_fused_forward(...)`
 - [ ] `projection_ewa_3dgs_packed_forward(...)`
@@ -240,7 +253,7 @@
 - [x] `scripts/test/intersect_tile_forward.py`
 - [x] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
 - [x] `scripts/test/spherical_harmonics_forward.py`
-- [ ] `scripts/test/quat_scale_to_covar_preci_forward.py`
+- [x] `scripts/test/quat_scale_to_covar_preci_forward.py`
 
 ## Acceptance Criteria
 - [ ] `make env-check` passes.

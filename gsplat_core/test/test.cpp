@@ -8,6 +8,7 @@
 #include "../include/dummy.h"
 #include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
+#include "../include/gsplat_quat_scale_to_covar.h"
 #include "../include/gsplat_rasterize.h"
 #include "../include/gsplat_spherical_harmonics.h"
 
@@ -575,6 +576,78 @@ void test_spherical_harmonics_forward_reference() {
   std::cout << "spherical_harmonics_forward reference smoke ok\n";
 }
 
+void test_quat_scale_to_covar_preci_reference() {
+  mx::array quats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       2.0f, 0.0f, 0.0f, 0.0f},
+      {2, 4},
+      mx::float32);
+  mx::array scales(
+      {2.0f, 3.0f, 4.0f,
+       0.5f, 2.0f, 4.0f},
+      {2, 3},
+      mx::float32);
+
+  gsplat_core::QuatScaleToCovarPreciInput triu_input = {
+      .quats = quats,
+      .scales = scales,
+      .s = mx::Device::cpu,
+      .compute_covar = true,
+      .compute_preci = true,
+      .triu = true,
+  };
+  std::vector<mx::array> triu_outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(triu_input);
+  expect(triu_outputs.size() == 2, "quat_scale output count mismatch");
+  expect_shape(triu_outputs[gsplat_core::kCovars], {2, 6}, "quat covars triu");
+  expect_shape(triu_outputs[gsplat_core::kPrecis], {2, 6}, "quat precis triu");
+  expect_dtype(triu_outputs[gsplat_core::kCovars], mx::float32,
+               "quat covars triu");
+  expect_dtype(triu_outputs[gsplat_core::kPrecis], mx::float32,
+               "quat precis triu");
+  mx::eval(triu_outputs);
+
+  const float* covars = triu_outputs[gsplat_core::kCovars].data<float>();
+  const float* precis = triu_outputs[gsplat_core::kPrecis].data<float>();
+  const float expected_covars[12] = {
+      4.0f, 0.0f, 0.0f, 9.0f, 0.0f, 16.0f,
+      0.25f, 0.0f, 0.0f, 4.0f, 0.0f, 16.0f,
+  };
+  const float expected_precis[12] = {
+      0.25f, 0.0f, 0.0f, 1.0f / 9.0f, 0.0f, 1.0f / 16.0f,
+      4.0f, 0.0f, 0.0f, 0.25f, 0.0f, 1.0f / 16.0f,
+  };
+  for (int i = 0; i < 12; ++i) {
+    expect_close(covars[i], expected_covars[i], 1.0e-6f,
+                 "quat covars triu");
+    expect_close(precis[i], expected_precis[i], 1.0e-6f,
+                 "quat precis triu");
+  }
+
+  gsplat_core::QuatScaleToCovarPreciInput full_input = triu_input;
+  full_input.triu = false;
+  full_input.compute_preci = false;
+  std::vector<mx::array> full_outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(full_input);
+  expect_shape(full_outputs[gsplat_core::kCovars], {2, 3, 3},
+               "quat covars full");
+  expect_shape(full_outputs[gsplat_core::kPrecis], {0}, "quat precis empty");
+  mx::eval(full_outputs);
+
+  const float* full_covars = full_outputs[gsplat_core::kCovars].data<float>();
+  const float expected_full0[9] = {
+      4.0f, 0.0f, 0.0f,
+      0.0f, 9.0f, 0.0f,
+      0.0f, 0.0f, 16.0f,
+  };
+  for (int i = 0; i < 9; ++i) {
+    expect_close(full_covars[i], expected_full0[i], 1.0e-6f,
+                 "quat covars full");
+  }
+
+  std::cout << "quat_scale_to_covar_preci reference smoke ok\n";
+}
+
 }  // namespace
 
 int main() {
@@ -587,6 +660,7 @@ int main() {
     test_intersect_tile_and_offset_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();
+    test_quat_scale_to_covar_preci_reference();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;
   } catch (const std::exception& e) {

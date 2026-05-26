@@ -13,6 +13,7 @@
 #include "../include/dummy.h"
 #include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
+#include "../include/gsplat_quat_scale_to_covar.h"
 #include "../include/gsplat_rasterize.h"
 #include "../include/gsplat_spherical_harmonics.h"
 
@@ -227,6 +228,30 @@ mx::array spherical_harmonics_forward(
   return gsplat_core::gsplat_spherical_harmonics_forward(input);
 }
 
+nb::dict quat_scale_to_covar_preci_forward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    bool compute_covar,
+    bool compute_preci,
+    bool triu) {
+  const auto& quats = require_key(inputs, "quats");
+  const auto& scales = require_key(inputs, "scales");
+
+  gsplat_core::QuatScaleToCovarPreciInput input = {
+      .quats = quats,
+      .scales = scales,
+      .s = mx::Device::cpu,
+      .compute_covar = compute_covar,
+      .compute_preci = compute_preci,
+      .triu = triu,
+  };
+
+  auto outputs = gsplat_core::gsplat_quat_scale_to_covar_preci_forward(input);
+  nb::dict result;
+  result["covars"] = outputs[gsplat_core::kCovars];
+  result["precis"] = outputs[gsplat_core::kPrecis];
+  return result;
+}
+
 }  // namespace
 
 NB_MODULE(_gsplat_core, m) {
@@ -275,4 +300,11 @@ NB_MODULE(_gsplat_core, m) {
       &spherical_harmonics_forward,
       "degrees_to_use"_a,
       "inputs"_a);
+  m.def(
+      "quat_scale_to_covar_preci_forward",
+      &quat_scale_to_covar_preci_forward,
+      "inputs"_a,
+      "compute_covar"_a = true,
+      "compute_preci"_a = true,
+      "triu"_a = true);
 }
