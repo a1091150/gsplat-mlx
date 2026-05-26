@@ -547,3 +547,112 @@
 - [x] Existing Python-facing dense `quat_scale_to_covar_preci_forward` matches exported CUDA `.npz`.
 - [x] Current available exported CUDA `.npz` fixtures pass on the Mac/MLX side.
 - [ ] Direct CUDA/PyTorch parity scripts pass on a CUDA machine.
+
+---
+
+# Task 6 - 3DGS Backward Migration Plan
+
+## Scope
+- Plan the gsplat 3DGS dense backward migration before implementing any single
+  backward kernel.
+- Keep the first backward milestone aligned with the completed dense forward
+  low-level path.
+- Prefer explicit low-level backward APIs first, then connect MLX Primitive
+  `vjp(...)` after parity and calling conventions are stable.
+
+## In Scope For First Backward Milestone
+- Dense 3DGS backward for the current low-level forward chain:
+  projection fused dense, rasterize to pixels 3DGS dense, spherical harmonics,
+  and quat/scale covariance/precision.
+- MLX arrays and Metal kernels under the existing `gsplat_core` naming scheme.
+- Python-facing manual scripts and exported `.npz` comparison scripts.
+- C++/Metal smoke tests through `make codex-xcode-test`.
+- Training-gradient design that supports `viewspace_points` as a dummy
+  trainable gradient carrier when screen-space `means2d` gradients are needed.
+
+## Out Of Scope For First Backward Milestone
+- 2DGS backward.
+- Packed backward paths.
+- UT / rolling-shutter / world-ray backward.
+- Lidar backward.
+- Adam, relocation, MCMC perturb, camera wrappers, and external distortion.
+- A high-level gsplat-compatible training wrapper before low-level backward
+  parity is established.
+
+## CUDA Backward Source Map
+- Python autograd and saved tensors:
+  - `submodules/gsplat/gsplat/cuda/_wrapper.py`
+  - `submodules/gsplat/gsplat/cuda/ext.cpp`
+- Quat/scale backward:
+  - `submodules/gsplat/gsplat/cuda/csrc/QuatScaleToCovar.cpp`
+  - `submodules/gsplat/gsplat/cuda/csrc/QuatScaleToCovarCUDA.cu`
+  - `submodules/gsplat/gsplat/cuda/csrc/QuatScaleToCovar.h`
+- Spherical harmonics backward:
+  - `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonics.cpp`
+  - `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonicsCUDA.cu`
+  - `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonics.h`
+- Projection 3DGS fused backward:
+  - `submodules/gsplat/gsplat/cuda/csrc/Projection.cpp`
+  - `submodules/gsplat/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu`
+- Rasterize to pixels 3DGS backward:
+  - `submodules/gsplat/gsplat/cuda/csrc/Rasterization.cpp`
+  - `submodules/gsplat/gsplat/cuda/csrc/RasterizeToPixels3DGSBwd.cu`
+  - `submodules/gsplat/gsplat/cuda/csrc/RasterizeToPixels3DGSFwd.cu`
+
+## API Strategy
+- First expose explicit backward functions from `_gsplat_core`, for example:
+  - `quat_scale_to_covar_preci_backward(...)`
+  - `spherical_harmonics_backward(...)`
+  - `projection_ewa_3dgs_fused_backward(...)`
+  - `rasterize_to_pixels_3dgs_backward(...)`
+- Keep explicit backward APIs close to the CUDA custom-op backward signatures,
+  using MLX arrays instead of torch tensors.
+- Use explicit backward APIs for CUDA `.npz` parity first because they are
+  easier to test and debug than autograd-integrated primitive `vjp(...)`.
+- After each explicit backward op is numerically stable, wire the matching MLX
+  Primitive `vjp(...)` implementation to call the explicit backward path.
+- Keep `jvp(...)` unsupported until there is a concrete forward-mode need.
+
+## MLX Gradient Proxy Rule
+- PyTorch can retain intermediate gradients with `retain_grad()`, but MLX
+  gradients are selected through `mx.value_and_grad(fn, argnums=...)`.
+- If training or after-training logic needs `means2d` gradient information,
+  introduce a dummy trainable parameter, preferably `viewspace_points`, as a
+  visible loss-function argument.
+- The dummy gradient proxy must be included in `argnums` so MLX returns its
+  gradient.
+- Backward API design must preserve enough information for densify, clone,
+  split, and related after-training logic to consume the screen-space gradient
+  path.
+
+## Proposed Implementation Order
+- [ ] Task 6.1: Backward CUDA source map and saved-tensor contract.
+- [ ] Task 6.2: Backward API design doc and `.npz` fixture schema.
+- [ ] Task 6.3: Spherical harmonics explicit backward.
+- [ ] Task 6.4: Quat/scale covariance/precision explicit backward.
+- [ ] Task 6.5: Rasterize to pixels 3DGS explicit backward.
+- [ ] Task 6.6: Projection EWA 3DGS fused explicit backward.
+- [ ] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
+- [ ] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
+
+## Validation Plan
+- Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
+- Store exported backward fixtures under `refs/*.npz`.
+- Extend `scripts/test/compare_exported_npz.py` with backward comparers.
+- Add C++/Metal smoke tests for small deterministic scenes.
+- Run:
+  - `make codex-xcode-test`
+  - `make xcode-build`
+  - `make pip-install`
+  - `conda run -n fastgs_core python scripts/test/compare_exported_npz.py`
+- Use direct CUDA/PyTorch parity scripts only on a CUDA machine.
+
+## Open Design Questions
+- Whether rasterize backward should output both signed `means2d` gradient and
+  absolute-gradient equivalents for `absgrad` behavior.
+- Whether `last_ids` and transmittance handling should exactly mirror CUDA
+  saved forward state or recompute small pieces in the backward kernel.
+- Whether first MLX `vjp(...)` wiring should start with the simpler SH or
+  quat/scale op before rasterize/projection.
+- How much of the high-level training wrapper should be delayed until dense
+  low-level backward parity is stable.
