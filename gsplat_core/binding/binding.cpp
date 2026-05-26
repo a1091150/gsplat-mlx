@@ -14,6 +14,7 @@
 #include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
 #include "../include/gsplat_rasterize.h"
+#include "../include/gsplat_spherical_harmonics.h"
 
 namespace nb = nanobind;
 namespace mx = mlx::core;
@@ -208,6 +209,24 @@ nb::dict rasterize_to_pixels_3dgs_forward(
   return result;
 }
 
+mx::array spherical_harmonics_forward(
+    int degrees_to_use,
+    const std::unordered_map<std::string, mx::array>& inputs) {
+  const auto& dirs = require_key(inputs, "dirs");
+  const auto& coeffs = require_key(inputs, "coeffs");
+  mx::array masks = get_or_empty(inputs, "masks");
+
+  gsplat_core::SphericalHarmonicsInput input = {
+      .degrees_to_use = degrees_to_use,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = masks,
+      .s = mx::Device::cpu,
+      .use_masks = masks.size() != 0,
+  };
+  return gsplat_core::gsplat_spherical_harmonics_forward(input);
+}
+
 }  // namespace
 
 NB_MODULE(_gsplat_core, m) {
@@ -251,4 +270,9 @@ NB_MODULE(_gsplat_core, m) {
       "image_width"_a,
       "image_height"_a,
       "tile_size"_a);
+  m.def(
+      "spherical_harmonics_forward",
+      &spherical_harmonics_forward,
+      "degrees_to_use"_a,
+      "inputs"_a);
 }

@@ -9,6 +9,7 @@
 #include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
 #include "../include/gsplat_rasterize.h"
+#include "../include/gsplat_spherical_harmonics.h"
 
 namespace mx = mlx::core;
 
@@ -500,6 +501,80 @@ void test_rasterize_to_pixels_3dgs_dense_reference() {
   std::cout << "rasterize_to_pixels_3dgs dense reference smoke ok\n";
 }
 
+void test_spherical_harmonics_forward_reference() {
+  mx::array dirs(
+      {0.0f, 0.0f, 1.0f,
+       1.0f, 0.0f, 0.0f},
+      {2, 3},
+      mx::float32);
+  mx::array coeffs(
+      {1.0f, 2.0f, 3.0f,
+       0.1f, 0.2f, 0.3f,
+       0.4f, 0.5f, 0.6f,
+       0.7f, 0.8f, 0.9f,
+       4.0f, 5.0f, 6.0f,
+       0.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 0.0f},
+      {2, 4, 3},
+      mx::float32);
+
+  gsplat_core::SphericalHarmonicsInput degree0_input = {
+      .degrees_to_use = 0,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .s = mx::Device::cpu,
+      .use_masks = false,
+  };
+  mx::array degree0 =
+      gsplat_core::gsplat_spherical_harmonics_forward(degree0_input);
+  expect_shape(degree0, {2, 3}, "spherical_harmonics degree0");
+  expect_dtype(degree0, mx::float32, "spherical_harmonics degree0");
+  degree0.eval();
+
+  constexpr float c0 = 0.2820947917738781f;
+  const float* degree0_data = degree0.data<float>();
+  expect_close(degree0_data[0], c0 * 1.0f, 1.0e-6f, "SH degree0 red");
+  expect_close(degree0_data[1], c0 * 2.0f, 1.0e-6f, "SH degree0 green");
+  expect_close(degree0_data[2], c0 * 3.0f, 1.0e-6f, "SH degree0 blue");
+  expect_close(degree0_data[3], c0 * 4.0f, 1.0e-6f, "SH degree0 red elem1");
+
+  gsplat_core::SphericalHarmonicsInput degree1_input = degree0_input;
+  degree1_input.degrees_to_use = 1;
+  mx::array degree1 =
+      gsplat_core::gsplat_spherical_harmonics_forward(degree1_input);
+  degree1.eval();
+
+  constexpr float c1 = 0.48860251190292f;
+  const float* degree1_data = degree1.data<float>();
+  expect_close(degree1_data[0], c0 * 1.0f + c1 * 0.4f, 1.0e-6f,
+               "SH degree1 red z");
+  expect_close(degree1_data[1], c0 * 2.0f + c1 * 0.5f, 1.0e-6f,
+               "SH degree1 green z");
+  expect_close(degree1_data[2], c0 * 3.0f + c1 * 0.6f, 1.0e-6f,
+               "SH degree1 blue z");
+  expect_close(degree1_data[3], c0 * 4.0f, 1.0e-6f,
+               "SH degree1 red x");
+  expect_close(degree1_data[4], c0 * 5.0f, 1.0e-6f,
+               "SH degree1 green x");
+  expect_close(degree1_data[5], c0 * 6.0f, 1.0e-6f,
+               "SH degree1 blue x");
+
+  mx::array masks({true, false}, {2}, mx::bool_);
+  gsplat_core::SphericalHarmonicsInput masked_input = degree0_input;
+  masked_input.masks = masks;
+  masked_input.use_masks = true;
+  mx::array masked =
+      gsplat_core::gsplat_spherical_harmonics_forward(masked_input);
+  masked.eval();
+  const float* masked_data = masked.data<float>();
+  expect_close(masked_data[0], c0 * 1.0f, 1.0e-6f, "SH masked elem0");
+  expect_close(masked_data[3], 0.0f, 1.0e-6f, "SH masked elem1");
+
+  std::cout << "spherical_harmonics_forward reference smoke ok\n";
+}
+
 }  // namespace
 
 int main() {
@@ -511,6 +586,7 @@ int main() {
     test_projection_ewa_3dgs_fused_gpu_numeric();
     test_intersect_tile_and_offset_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
+    test_spherical_harmonics_forward_reference();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;
   } catch (const std::exception& e) {

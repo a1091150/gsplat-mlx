@@ -109,7 +109,7 @@
 
 ## 3DGS Forward Ops
 - [ ] `quat_scale_to_covar_preci_fwd`
-- [ ] `spherical_harmonics_fwd`
+- [x] `spherical_harmonics_fwd`
 - [x] `projection_ewa_3dgs_fused_fwd`
 - [ ] `projection_ewa_3dgs_packed_fwd`
 - [x] `intersect_tile`
@@ -139,7 +139,7 @@
 - [ ] Task 3.1: Projection 3DGS fused forward numeric parity.
 - [x] Task 3.2: Intersect tile / intersect offset forward.
 - [x] Task 3.3: Rasterize to pixels 3DGS forward.
-- [ ] Task 3.4: Spherical harmonics forward.
+- [x] Task 3.4: Spherical harmonics forward.
 - [ ] Task 3.5: Quat/scale to covariance/precision forward.
 
 ## Implementation Rules
@@ -192,6 +192,18 @@
 - [ ] Support packed path.
 - [ ] CUDA/PyTorch numeric parity.
 
+## Task 3.4 - Spherical Harmonics Forward
+- [x] Add `gsplat_core/include/gsplat_spherical_harmonics.h`.
+- [x] Add `gsplat_core/gsplat_spherical_harmonics.cpp`.
+- [x] Add `gsplat_core/metal/gsplat_spherical_harmonics.metal`.
+- [x] Expose `spherical_harmonics_forward(...)` from `_gsplat_core`.
+- [x] Support dense first-version C++ reference path.
+- [x] Support degree 0 through degree 4 SH basis evaluation.
+- [x] Support optional masks with deterministic zero output for masked entries.
+- [x] Add C++ smoke coverage for degree 0, degree 1, and masks.
+- [ ] Move spherical harmonics from C++ reference path to Metal kernels.
+- [ ] CUDA/PyTorch numeric parity.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -202,7 +214,7 @@
 
 ## Planned APIs
 - [ ] `quat_scale_to_covar_preci_forward(...)`
-- [ ] `spherical_harmonics_forward(...)`
+- [x] `spherical_harmonics_forward(...)`
 - [x] `projection_ewa_3dgs_fused_forward(...)`
 - [ ] `projection_ewa_3dgs_packed_forward(...)`
 - [x] `intersect_tile_forward(...)`
@@ -227,7 +239,7 @@
 - [x] `scripts/test/projection_ewa_3dgs_fused_forward.py`
 - [x] `scripts/test/intersect_tile_forward.py`
 - [x] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
-- [ ] `scripts/test/spherical_harmonics_forward.py`
+- [x] `scripts/test/spherical_harmonics_forward.py`
 - [ ] `scripts/test/quat_scale_to_covar_preci_forward.py`
 
 ## Acceptance Criteria
