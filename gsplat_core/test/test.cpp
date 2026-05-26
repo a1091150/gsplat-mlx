@@ -648,6 +648,165 @@ void test_quat_scale_to_covar_preci_reference() {
   std::cout << "quat_scale_to_covar_preci reference smoke ok\n";
 }
 
+void test_3dgs_forward_chain_smoke() {
+  constexpr int image_width = 16;
+  constexpr int image_height = 16;
+  constexpr int tile_size = 8;
+  constexpr int tile_width = 2;
+  constexpr int tile_height = 2;
+  constexpr float c0 = 0.2820947917738781f;
+
+  mx::array means({0.0f, 0.0f, 2.0f}, {1, 1, 3}, mx::float32);
+  mx::array quats({1.0f, 0.0f, 0.0f, 0.0f}, {1, 1, 4}, mx::float32);
+  mx::array scales({0.1f, 0.1f, 0.1f}, {1, 1, 3}, mx::float32);
+  mx::array projection_opacities({0.8f}, {1, 1}, mx::float32);
+  mx::array raster_opacities({0.8f}, {1, 1, 1}, mx::float32);
+  mx::array viewmats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       0.0f, 1.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 1.0f, 0.0f,
+       0.0f, 0.0f, 0.0f, 1.0f},
+      {1, 1, 4, 4},
+      mx::float32);
+  mx::array Ks(
+      {20.0f, 0.0f, 8.0f,
+       0.0f, 20.0f, 8.0f,
+       0.0f, 0.0f, 1.0f},
+      {1, 1, 3, 3},
+      mx::float32);
+
+  gsplat_core::ProjectionEWA3DGSFusedInput projection_input = {
+      .means = means,
+      .covars = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .quats = quats,
+      .scales = scales,
+      .opacities = projection_opacities,
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .s = mx::Device::gpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .eps2d = 0.3f,
+          .near_plane = 0.01f,
+          .far_plane = 100.0f,
+          .radius_clip = 0.0f,
+          .calc_compensations = false,
+          .camera_model = 0,
+          .use_covars = false,
+          .use_opacities = true,
+      },
+  };
+  std::vector<mx::array> projection =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(projection_input);
+  expect_shape(projection[gsplat_core::kRadii], {1, 1, 1, 2},
+               "chain projection radii");
+  expect_shape(projection[gsplat_core::kMeans2D], {1, 1, 1, 2},
+               "chain projection means2d");
+  expect_shape(projection[gsplat_core::kDepths], {1, 1, 1},
+               "chain projection depths");
+  expect_shape(projection[gsplat_core::kConics], {1, 1, 1, 3},
+               "chain projection conics");
+
+  mx::array dirs({0.0f, 0.0f, 1.0f}, {1, 1, 1, 3}, mx::float32);
+  mx::array coeffs({1.0f / c0, 0.0f, 0.0f}, {1, 1, 1, 1, 3}, mx::float32);
+  gsplat_core::SphericalHarmonicsInput sh_input = {
+      .degrees_to_use = 0,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .s = mx::Device::cpu,
+      .use_masks = false,
+  };
+  mx::array colors = gsplat_core::gsplat_spherical_harmonics_forward(sh_input);
+  expect_shape(colors, {1, 1, 1, 3}, "chain SH colors");
+
+  gsplat_core::IntersectTileInput intersect_input = {
+      .means2d = projection[gsplat_core::kMeans2D],
+      .radii = projection[gsplat_core::kRadii],
+      .depths = projection[gsplat_core::kDepths],
+      .conics = mx::zeros({0}, mx::float32),
+      .opacities = mx::zeros({0}, mx::float32),
+      .image_ids = mx::zeros({0}, mx::int64),
+      .gaussian_ids = mx::zeros({0}, mx::int64),
+      .s = mx::Device::cpu,
+      .params = {
+          .I = 1,
+          .tile_size = tile_size,
+          .tile_width = tile_width,
+          .tile_height = tile_height,
+          .sort = true,
+          .segmented = false,
+          .packed = false,
+          .use_conics = false,
+          .use_opacities = false,
+      },
+  };
+  std::vector<mx::array> intersections =
+      gsplat_core::gsplat_intersect_tile(intersect_input);
+  expect(intersections[gsplat_core::kIsectIds].size() > 0,
+         "chain intersect should produce tile hits");
+
+  mx::array tile_offsets = gsplat_core::gsplat_intersect_offset(
+      intersections[gsplat_core::kIsectIds],
+      1,
+      tile_width,
+      tile_height,
+      mx::Device::cpu);
+  expect_shape(tile_offsets, {1, tile_height, tile_width},
+               "chain tile offsets");
+
+  mx::array backgrounds({0.0f, 0.0f, 0.0f}, {1, 3}, mx::float32);
+  gsplat_core::RasterizeToPixels3DGSInput raster_input = {
+      .means2d = projection[gsplat_core::kMeans2D],
+      .conics = projection[gsplat_core::kConics],
+      .colors = colors,
+      .opacities = raster_opacities,
+      .backgrounds = backgrounds,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .tile_offsets = tile_offsets,
+      .flatten_ids = intersections[gsplat_core::kFlattenIds],
+      .s = mx::Device::cpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .tile_size = tile_size,
+          .use_backgrounds = true,
+          .use_masks = false,
+          .packed = false,
+      },
+  };
+  std::vector<mx::array> render =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs(raster_input);
+  expect_shape(render[gsplat_core::kRenderColors], {1, 16, 16, 3},
+               "chain render colors");
+  expect_shape(render[gsplat_core::kRenderAlphas], {1, 16, 16, 1},
+               "chain render alphas");
+  expect_shape(render[gsplat_core::kLastIds], {1, 16, 16},
+               "chain last ids");
+
+  mx::eval(render);
+  const float* render_colors = render[gsplat_core::kRenderColors].data<float>();
+  const float* render_alphas = render[gsplat_core::kRenderAlphas].data<float>();
+  float alpha_sum = 0.0f;
+  float red_sum = 0.0f;
+  float green_sum = 0.0f;
+  float blue_sum = 0.0f;
+  for (int pixel = 0; pixel < image_width * image_height; ++pixel) {
+    alpha_sum += render_alphas[pixel];
+    red_sum += render_colors[pixel * 3];
+    green_sum += render_colors[pixel * 3 + 1];
+    blue_sum += render_colors[pixel * 3 + 2];
+  }
+
+  expect(alpha_sum > 0.01f, "chain render alpha should be nonzero");
+  expect(red_sum > 0.01f, "chain render red should be nonzero");
+  expect(green_sum < 1.0e-5f, "chain render green should stay zero");
+  expect(blue_sum < 1.0e-5f, "chain render blue should stay zero");
+
+  std::cout << "3dgs forward chain smoke ok\n";
+}
+
 }  // namespace
 
 int main() {
@@ -661,6 +820,7 @@ int main() {
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();
     test_quat_scale_to_covar_preci_reference();
+    test_3dgs_forward_chain_smoke();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;
   } catch (const std::exception& e) {

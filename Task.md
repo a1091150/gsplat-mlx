@@ -141,6 +141,7 @@
 - [x] Task 3.3: Rasterize to pixels 3DGS forward.
 - [x] Task 3.4: Spherical harmonics forward.
 - [x] Task 3.5: Quat/scale to covariance/precision forward.
+- [x] Task 3.6: End-to-end 3DGS forward smoke chain.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -217,6 +218,16 @@
 - [ ] Move quat/scale covariance from C++ reference path to Metal kernels.
 - [ ] CUDA/PyTorch numeric parity.
 
+## Task 3.6 - End-to-End 3DGS Forward Smoke Chain
+- [x] Add C++ smoke coverage that chains projection, intersect tile, intersect offset, spherical harmonics, and rasterize.
+- [x] Validate the first-version dense data flow from projected 3D Gaussian attributes to non-empty rendered pixels.
+- [x] Verify render output shapes for colors, alphas, and last ids.
+- [x] Verify the smoke scene produces nonzero alpha and expected red-only color energy.
+- [x] Add manual Python script `scripts/test/forward_3dgs_chain.py`.
+- [ ] CUDA/PyTorch numeric parity.
+- [ ] High-level Python rasterization compatibility wrapper.
+- [ ] Full Metal implementations for the current C++ reference-path ops.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -254,6 +265,7 @@
 - [x] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
 - [x] `scripts/test/spherical_harmonics_forward.py`
 - [x] `scripts/test/quat_scale_to_covar_preci_forward.py`
+- [x] `scripts/test/forward_3dgs_chain.py`
 
 ## Acceptance Criteria
 - [ ] `make env-check` passes.
@@ -261,4 +273,4 @@
 - [ ] `make pip-develop` succeeds in the conda environment.
 - [ ] Each migrated op imports from `gsplat_core`.
 - [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
-- [ ] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
+- [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
