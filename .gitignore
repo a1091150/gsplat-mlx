@@ -287,3 +287,4 @@ $RECYCLE.BIN/
 submodules/*
 build/
 build-*/
+outputs/*

@@ -2,9 +2,14 @@ CONDA_ENV ?= fastgs_core
 XCODE_BUILD_DIR ?= build_xcode
 XCODE_DERIVED_DATA_DIR ?= /private/tmp/gsplat_core_xcode_derived
 CONFIG ?= Release
+RANDOM_3DGS_PNG ?= outputs/random_3dgs.png
+RANDOM_3DGS_SEED ?= 7
+RANDOM_3DGS_N ?= 1024
+RANDOM_3DGS_WIDTH ?= 512
+RANDOM_3DGS_HEIGHT ?= 512
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png clean
 
 help:
 	@printf "Targets:\n"
@@ -13,6 +18,7 @@ help:
 	@printf "  make pip-install  pip install . --no-build-isolation in the conda env.\n"
 	@printf "  make pip-develop  pip install -e . --no-build-isolation in the conda env.\n"
 	@printf "  make codex-xcode-test  Build and run the C++ smoke test through the Xcode project.\n"
+	@printf "  make codex-random-png  Render a random 3DGS PNG smoke image for manual inspection.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
 env-check:
@@ -58,6 +64,15 @@ codex-xcode-test:
 		-derivedDataPath $(XCODE_DERIVED_DATA_DIR) \
 		build && \
 	./$(XCODE_BUILD_DIR)/$(CONFIG)/gsplat_core_dummy_test'
+
+codex-random-png:
+	/bin/zsh -lc 'source "$(CONDA_BASE)/etc/profile.d/conda.sh" && conda activate $(CONDA_ENV) && \
+	python scripts/test/render_random_3dgs_png.py \
+		--out "$(RANDOM_3DGS_PNG)" \
+		--seed $(RANDOM_3DGS_SEED) \
+		--num-gaussians $(RANDOM_3DGS_N) \
+		--width $(RANDOM_3DGS_WIDTH) \
+		--height $(RANDOM_3DGS_HEIGHT)'
 
 clean:
 	rm -rf $(XCODE_BUILD_DIR) build build-* dist *.egg-info python_package/*.egg-info
