@@ -697,6 +697,76 @@ void test_quat_scale_to_covar_preci_reference() {
   std::cout << "quat_scale_to_covar_preci reference smoke ok\n";
 }
 
+void test_quat_scale_to_covar_preci_gpu_reference() {
+  mx::array quats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       2.0f, 0.0f, 0.0f, 0.0f},
+      {2, 4},
+      mx::float32);
+  mx::array scales(
+      {2.0f, 3.0f, 4.0f,
+       0.5f, 2.0f, 4.0f},
+      {2, 3},
+      mx::float32);
+
+  gsplat_core::QuatScaleToCovarPreciInput triu_input = {
+      .quats = quats,
+      .scales = scales,
+      .s = mx::Device::gpu,
+      .compute_covar = true,
+      .compute_preci = true,
+      .triu = true,
+  };
+  std::vector<mx::array> triu_outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(triu_input);
+  expect_shape(triu_outputs[gsplat_core::kCovars], {2, 6},
+               "quat gpu covars triu");
+  expect_shape(triu_outputs[gsplat_core::kPrecis], {2, 6},
+               "quat gpu precis triu");
+  mx::eval(triu_outputs);
+
+  const float* covars = triu_outputs[gsplat_core::kCovars].data<float>();
+  const float* precis = triu_outputs[gsplat_core::kPrecis].data<float>();
+  const float expected_covars[12] = {
+      4.0f, 0.0f, 0.0f, 9.0f, 0.0f, 16.0f,
+      0.25f, 0.0f, 0.0f, 4.0f, 0.0f, 16.0f,
+  };
+  const float expected_precis[12] = {
+      0.25f, 0.0f, 0.0f, 1.0f / 9.0f, 0.0f, 1.0f / 16.0f,
+      4.0f, 0.0f, 0.0f, 0.25f, 0.0f, 1.0f / 16.0f,
+  };
+  for (int i = 0; i < 12; ++i) {
+    expect_close(covars[i], expected_covars[i], 1.0e-6f,
+                 "quat gpu covars triu");
+    expect_close(precis[i], expected_precis[i], 1.0e-6f,
+                 "quat gpu precis triu");
+  }
+
+  gsplat_core::QuatScaleToCovarPreciInput full_input = triu_input;
+  full_input.triu = false;
+  full_input.compute_preci = false;
+  std::vector<mx::array> full_outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_forward(full_input);
+  expect_shape(full_outputs[gsplat_core::kCovars], {2, 3, 3},
+               "quat gpu covars full");
+  expect_shape(full_outputs[gsplat_core::kPrecis], {0},
+               "quat gpu precis empty");
+  mx::eval(full_outputs);
+
+  const float* full_covars = full_outputs[gsplat_core::kCovars].data<float>();
+  const float expected_full0[9] = {
+      4.0f, 0.0f, 0.0f,
+      0.0f, 9.0f, 0.0f,
+      0.0f, 0.0f, 16.0f,
+  };
+  for (int i = 0; i < 9; ++i) {
+    expect_close(full_covars[i], expected_full0[i], 1.0e-6f,
+                 "quat gpu covars full");
+  }
+
+  std::cout << "quat_scale_to_covar_preci GPU reference smoke ok\n";
+}
+
 void test_3dgs_forward_chain_smoke() {
   constexpr int image_width = 16;
   constexpr int image_height = 16;
@@ -870,6 +940,7 @@ int main() {
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
     test_quat_scale_to_covar_preci_reference();
+    test_quat_scale_to_covar_preci_gpu_reference();
     test_3dgs_forward_chain_smoke();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;

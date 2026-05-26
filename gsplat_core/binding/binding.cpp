@@ -239,7 +239,7 @@ nb::dict quat_scale_to_covar_preci_forward(
   gsplat_core::QuatScaleToCovarPreciInput input = {
       .quats = quats,
       .scales = scales,
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .compute_covar = compute_covar,
       .compute_preci = compute_preci,
       .triu = triu,

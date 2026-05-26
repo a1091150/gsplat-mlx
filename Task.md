@@ -145,6 +145,7 @@
 - [x] Task 3.7: CUDA/PyTorch parity reference scripts.
 - [x] Task 3.8: CUDA reference `.npz` export scripts.
 - [x] Task 3.9: Spherical harmonics MLX Primitive + Metal kernel.
+- [x] Task 3.10: Quat/scale covariance/precision MLX Primitive + Metal kernel.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -220,7 +221,9 @@
 - [x] Support `triu=true` output order `[00, 01, 02, 11, 12, 22]`.
 - [x] Support `triu=false` full `3x3` row-major output.
 - [x] Add C++ smoke coverage for identity quats, non-unit quats, covariance, precision, and empty optional outputs.
-- [ ] Move quat/scale covariance from C++ reference path to Metal kernels.
+- [x] Move quat/scale covariance from C++ reference path to MLX Primitive + Metal kernel.
+- [x] Keep CPU reference path as fallback.
+- [x] Add C++/Metal GPU smoke coverage for triu, full matrix, covariance, precision, and empty optional outputs.
 - [ ] CUDA/PyTorch numeric parity.
 
 ## Task 3.6 - End-to-End 3DGS Forward Smoke Chain
@@ -264,6 +267,19 @@
 - [x] Support degree 0 through degree 4 on GPU.
 - [x] Support optional masks on GPU.
 - [x] Route Python binding `spherical_harmonics_forward` through GPU.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [ ] Run Python manual script after local package reinstall.
+- [ ] Compare against exported CUDA `.npz` reference.
+
+## Task 3.10 - Quat/Scale Covariance/Precision MLX Primitive + Metal Kernel
+- [x] Add `GSPlatQuatScaleToCovarPreci` Primitive.
+- [x] Add Metal kernel `gsplat_quat_scale_to_covar_preci_forward_kernel`.
+- [x] Preserve the CPU reference implementation in `eval_cpu`.
+- [x] Support covariance and precision outputs on GPU.
+- [x] Support `triu=true` and `triu=false` output layouts on GPU.
+- [x] Support empty optional outputs when `compute_covar` or `compute_preci` is disabled.
+- [x] Route Python binding `quat_scale_to_covar_preci_forward` through GPU.
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
 - [ ] Run Python manual script after local package reinstall.
@@ -328,4 +344,5 @@
 - [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
+- [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

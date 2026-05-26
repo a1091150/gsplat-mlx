@@ -1,17 +1,34 @@
 #include "include/gsplat_quat_scale_to_covar.h"
 
+#include "include/helper.h"
+
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
-#include "mlx/mlx.h"
-#include "mlx/ops.h"
+#include "mlx/backend/common/utils.h"
+#include "mlx/backend/cpu/encoder.h"
+#include "mlx/utils.h"
+
+#ifdef _METAL_
+#include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/utils.h"
+#endif
 
 namespace gsplat_core {
 namespace {
 
 struct Mat3 {
   float v[9];
+};
+
+struct QuatScaleToCovarPreciKernelParams {
+  uint32_t n;
+  uint32_t compute_covar;
+  uint32_t compute_preci;
+  uint32_t triu;
 };
 
 mx::Shape output_shape(const mx::array& quats, bool triu) {
@@ -31,6 +48,11 @@ mx::Shape output_shape(const mx::array& quats, bool triu) {
 }
 
 void validate_input(const QuatScaleToCovarPreciInput& input) {
+  if (input.quats.dtype().val() != mx::float32.val() ||
+      input.scales.dtype().val() != mx::float32.val()) {
+    throw std::runtime_error(
+        "quat_scale_to_covar_preci_forward currently supports float32 inputs.");
+  }
   if (input.quats.ndim() < 1 ||
       input.quats.shape(static_cast<int>(input.quats.ndim()) - 1) != 4) {
     throw std::runtime_error("quats must have shape [..., 4].");
@@ -129,54 +151,139 @@ std::vector<mx::array> gsplat_quat_scale_to_covar_preci_forward(
     const QuatScaleToCovarPreciInput& input) {
   validate_input(input);
 
-  mx::array quats = mx::contiguous(input.quats);
-  mx::array scales = mx::contiguous(input.scales);
+  auto prim = std::make_shared<GSPlatQuatScaleToCovarPreci>(
+      to_stream(input.s), input.compute_covar, input.compute_preci, input.triu);
+  const mx::Shape out_shape = output_shape(input.quats, input.triu);
+  std::vector<mx::Shape> output_shapes = {
+      input.compute_covar ? out_shape : mx::Shape{0},
+      input.compute_preci ? out_shape : mx::Shape{0},
+  };
+  std::vector<mx::Dtype> output_types = {mx::float32, mx::float32};
+  std::vector<mx::array> inputs = {
+      mx::contiguous(input.quats),
+      mx::contiguous(input.scales),
+  };
+  return mx::array::make_arrays(output_shapes, output_types, prim, inputs);
+}
+
+void GSPlatQuatScaleToCovarPreci::eval_cpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  const auto& quats = inputs[0];
+  const auto& scales = inputs[1];
   mx::eval(quats, scales);
 
+  for (auto& out : outputs) {
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    std::memset(out.data<void>(), 0, out.nbytes());
+  }
+
   const int n = static_cast<int>(quats.size() / 4);
-  const int out_stride = input.triu ? 6 : 9;
+  const int out_stride = triu_ ? 6 : 9;
   const float* quats_data = quats.data<float>();
   const float* scales_data = scales.data<float>();
-
-  std::vector<float> covars;
-  std::vector<float> precis;
-  if (input.compute_covar) {
-    covars.resize(static_cast<size_t>(n * out_stride), 0.0f);
-  }
-  if (input.compute_preci) {
-    precis.resize(static_cast<size_t>(n * out_stride), 0.0f);
-  }
+  float* covars_data = compute_covar_ ? outputs[kCovars].data<float>() : nullptr;
+  float* precis_data = compute_preci_ ? outputs[kPrecis].data<float>() : nullptr;
 
   for (int elem = 0; elem < n; ++elem) {
     const Mat3 r = quat_to_rotmat(quats_data + elem * 4);
     const float* scale = scales_data + elem * 3;
-    if (input.compute_covar) {
+    if (compute_covar_) {
       const Mat3 covar = covariance_from_rotation_scale(r, scale, false);
-      write_matrix(
-          covar, input.triu, covars.data() + elem * out_stride);
+      write_matrix(covar, triu_, covars_data + elem * out_stride);
     }
-    if (input.compute_preci) {
+    if (compute_preci_) {
       const Mat3 preci = covariance_from_rotation_scale(r, scale, true);
-      write_matrix(
-          preci, input.triu, precis.data() + elem * out_stride);
+      write_matrix(preci, triu_, precis_data + elem * out_stride);
     }
+  }
+}
+
+#ifdef _METAL_
+void GSPlatQuatScaleToCovarPreci::eval_gpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  for (auto& out : outputs) {
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    std::memset(out.data<void>(), 0, out.nbytes());
   }
 
-  std::vector<mx::array> outputs;
-  outputs.reserve(2);
-  if (input.compute_covar) {
-    outputs.push_back(
-        mx::array(covars.begin(), output_shape(quats, input.triu), mx::float32));
-  } else {
-    outputs.push_back(mx::zeros({0}, mx::float32));
+  const auto& quats = inputs[0];
+  const auto& scales = inputs[1];
+  const uint32_t n = static_cast<uint32_t>(quats.size() / 4);
+  if (n == 0) {
+    return;
   }
-  if (input.compute_preci) {
-    outputs.push_back(
-        mx::array(precis.begin(), output_shape(quats, input.triu), mx::float32));
-  } else {
-    outputs.push_back(mx::zeros({0}, mx::float32));
+
+  QuatScaleToCovarPreciKernelParams kernel_params = {
+      .n = n,
+      .compute_covar = static_cast<uint32_t>(compute_covar_),
+      .compute_preci = static_cast<uint32_t>(compute_preci_),
+      .triu = static_cast<uint32_t>(triu_),
+  };
+
+  auto& s = stream();
+  auto& d = mx::metal::device(s.device);
+  auto lib = d.get_library("gsplat_core", current_binary_dir());
+  auto kernel = d.get_kernel("gsplat_quat_scale_to_covar_preci_forward_kernel", lib);
+
+  auto& compute_encoder = d.get_command_encoder(s.index);
+  compute_encoder.set_compute_pipeline_state(kernel);
+  compute_encoder.set_bytes(kernel_params, 0);
+  compute_encoder.set_input_array(quats, 1);
+  compute_encoder.set_input_array(scales, 2);
+  compute_encoder.set_output_array(outputs[kCovars], 3);
+  compute_encoder.set_output_array(outputs[kPrecis], 4);
+
+  const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
+  const size_t tgp_size = std::min(static_cast<size_t>(n), max_threads);
+  MTL::Size group_size = MTL::Size(tgp_size, 1, 1);
+  MTL::Size grid_size = MTL::Size(n, 1, 1);
+  compute_encoder.dispatch_threads(grid_size, group_size);
+}
+#else
+void GSPlatQuatScaleToCovarPreci::eval_gpu(
+    const std::vector<mx::array>&,
+    std::vector<mx::array>&) {
+  throw std::runtime_error(
+      "GSPlatQuatScaleToCovarPreci has no GPU implementation.");
+}
+#endif
+
+std::vector<mx::array> GSPlatQuatScaleToCovarPreci::jvp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&) {
+  throw std::runtime_error("GSPlatQuatScaleToCovarPreci jvp is not implemented.");
+}
+
+std::vector<mx::array> GSPlatQuatScaleToCovarPreci::vjp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&,
+    const std::vector<mx::array>&) {
+  throw std::runtime_error("GSPlatQuatScaleToCovarPreci vjp is not implemented.");
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+GSPlatQuatScaleToCovarPreci::vmap(const std::vector<mx::array>&,
+                                  const std::vector<int>&) {
+  throw std::runtime_error("GSPlatQuatScaleToCovarPreci vmap is not implemented.");
+}
+
+bool GSPlatQuatScaleToCovarPreci::is_equivalent(
+    const mx::Primitive& other) const {
+  if (name() != other.name()) {
+    return false;
   }
-  return outputs;
+  const auto* other_ptr =
+      dynamic_cast<const GSPlatQuatScaleToCovarPreci*>(&other);
+  if (!other_ptr) {
+    return false;
+  }
+  return compute_covar_ == other_ptr->compute_covar_ &&
+         compute_preci_ == other_ptr->compute_preci_ &&
+         triu_ == other_ptr->triu_;
 }
 
 }  // namespace gsplat_core
