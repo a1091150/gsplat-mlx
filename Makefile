@@ -1,9 +1,10 @@
 CONDA_ENV ?= fastgs_core
 XCODE_BUILD_DIR ?= build_xcode
+XCODE_DERIVED_DATA_DIR ?= /private/tmp/gsplat_core_xcode_derived
 CONFIG ?= Release
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test clean
 
 help:
 	@printf "Targets:\n"
@@ -11,6 +12,7 @@ help:
 	@printf "  make xcode-build  Configure and build _gsplat_core with Xcode using Python mlx package CMake config.\n"
 	@printf "  make pip-install  pip install . --no-build-isolation in the conda env.\n"
 	@printf "  make pip-develop  pip install -e . --no-build-isolation in the conda env.\n"
+	@printf "  make codex-xcode-test  Build and run the C++ smoke test through the Xcode project.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
 env-check:
@@ -39,6 +41,23 @@ pip-install:
 
 pip-develop:
 	/bin/zsh -lc 'source "$(CONDA_BASE)/etc/profile.d/conda.sh" && conda activate $(CONDA_ENV) && pip install -e . --no-build-isolation'
+
+codex-xcode-test:
+	/bin/zsh -lc 'source "$(CONDA_BASE)/etc/profile.d/conda.sh" && conda activate $(CONDA_ENV) && \
+	cmake -S . -B $(XCODE_BUILD_DIR) -G Xcode \
+		-DCMAKE_CXX_COMPILER="$$(xcrun --find clang++)" \
+		-DPython_EXECUTABLE="$$(which python)" \
+		-DGSPLAT_BUILD_PYTHON=ON \
+		-DGSPLAT_BUILD_TEST=ON \
+		-DGSPLAT_BUILD_METAL=ON \
+		-DGSPLAT_XCODE_DEV_MODE=ON \
+		-DGSPLAT_USE_MLX_MODULE_CMAKE_DIR=ON && \
+	xcodebuild -project $(XCODE_BUILD_DIR)/gsplat_core.xcodeproj \
+		-scheme gsplat_core_dummy_test \
+		-configuration $(CONFIG) \
+		-derivedDataPath $(XCODE_DERIVED_DATA_DIR) \
+		build && \
+	./$(XCODE_BUILD_DIR)/$(CONFIG)/gsplat_core_dummy_test'
 
 clean:
 	rm -rf $(XCODE_BUILD_DIR) build build-* dist *.egg-info python_package/*.egg-info
