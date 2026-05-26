@@ -260,7 +260,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    paths = args.paths or [REFS / name for name in sorted(COMPARERS)]
+    paths = args.paths or sorted(
+        path
+        for path in REFS.glob("*.npz")
+        if path.name in COMPARERS or path.name in EXTRA_COMPARERS
+    )
     all_results: list[bool] = []
     for path in paths:
         path = path if path.is_absolute() else ROOT / path
