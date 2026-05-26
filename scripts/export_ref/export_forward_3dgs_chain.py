@@ -61,6 +61,7 @@ def main() -> None:
     coeffs = torch.tensor([[[[[1.0 / c0, 0.0, 0.0]]]]], device="cuda", dtype=torch.float32)
     colors = gsplat.spherical_harmonics(0, dirs, coeffs)
     backgrounds = torch.zeros((1, 3), device="cuda", dtype=torch.float32)
+    gsplat_backgrounds = backgrounds[:, None, :]
     render_colors, render_alphas = gsplat.rasterize_to_pixels(
         means2d,
         conics,
@@ -71,7 +72,7 @@ def main() -> None:
         tile_size=tile_size,
         isect_offsets=tile_offsets,
         flatten_ids=flatten_ids,
-        backgrounds=backgrounds,
+        backgrounds=gsplat_backgrounds,
         masks=None,
         packed=False,
         absgrad=False,
