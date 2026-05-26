@@ -142,6 +142,7 @@
 - [x] Task 3.4: Spherical harmonics forward.
 - [x] Task 3.5: Quat/scale to covariance/precision forward.
 - [x] Task 3.6: End-to-end 3DGS forward smoke chain.
+- [x] Task 3.7: CUDA/PyTorch parity reference scripts.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -228,6 +229,18 @@
 - [ ] High-level Python rasterization compatibility wrapper.
 - [ ] Full Metal implementations for the current C++ reference-path ops.
 
+## Task 3.7 - CUDA/PyTorch Parity Reference Scripts
+- [x] Add shared parity helper `scripts/test/parity_utils.py`.
+- [x] Add projection fused parity script against `gsplat.cuda._wrapper.fully_fused_projection`.
+- [x] Add intersect tile / offset parity script against `gsplat.cuda._wrapper.isect_tiles` and `isect_offset_encode`.
+- [x] Add rasterize 3DGS parity script against `gsplat.cuda._wrapper.rasterize_to_pixels`.
+- [x] Add spherical harmonics parity script against `gsplat.cuda._wrapper.spherical_harmonics`.
+- [x] Add quat/scale covariance/precision parity script against `gsplat.cuda._wrapper.quat_scale_to_covar_preci`.
+- [x] Add end-to-end forward chain parity script.
+- [x] Scripts skip clearly when PyTorch CUDA or gsplat CUDA wrapper is unavailable.
+- [ ] Run and record numeric parity on a CUDA machine.
+- [ ] Tune tolerances after first CUDA reference run.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -266,6 +279,12 @@
 - [x] `scripts/test/spherical_harmonics_forward.py`
 - [x] `scripts/test/quat_scale_to_covar_preci_forward.py`
 - [x] `scripts/test/forward_3dgs_chain.py`
+- [x] `scripts/test/parity_projection_ewa_3dgs_fused_forward.py`
+- [x] `scripts/test/parity_intersect_tile_forward.py`
+- [x] `scripts/test/parity_rasterize_to_pixels_3dgs_forward.py`
+- [x] `scripts/test/parity_spherical_harmonics_forward.py`
+- [x] `scripts/test/parity_quat_scale_to_covar_preci_forward.py`
+- [x] `scripts/test/parity_forward_3dgs_chain.py`
 
 ## Acceptance Criteria
 - [ ] `make env-check` passes.
@@ -274,3 +293,4 @@
 - [ ] Each migrated op imports from `gsplat_core`.
 - [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
+- [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
