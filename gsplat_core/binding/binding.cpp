@@ -13,6 +13,7 @@
 #include "../include/dummy.h"
 #include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
+#include "../include/gsplat_rasterize.h"
 
 namespace nb = nanobind;
 namespace mx = mlx::core;
@@ -165,6 +166,48 @@ mx::array intersect_offset_forward(
       isect_ids, I, tile_width, tile_height, mx::Device::cpu);
 }
 
+nb::dict rasterize_to_pixels_3dgs_forward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    int image_width,
+    int image_height,
+    int tile_size) {
+  const auto& means2d = require_key(inputs, "means2d");
+  const auto& conics = require_key(inputs, "conics");
+  const auto& colors = require_key(inputs, "colors");
+  const auto& opacities = require_key(inputs, "opacities");
+  const auto& tile_offsets = require_key(inputs, "tile_offsets");
+  const auto& flatten_ids = require_key(inputs, "flatten_ids");
+  mx::array backgrounds = get_or_empty(inputs, "backgrounds");
+  mx::array masks = get_or_empty(inputs, "masks");
+
+  gsplat_core::RasterizeToPixels3DGSInput input = {
+      .means2d = means2d,
+      .conics = conics,
+      .colors = colors,
+      .opacities = opacities,
+      .backgrounds = backgrounds,
+      .masks = masks,
+      .tile_offsets = tile_offsets,
+      .flatten_ids = flatten_ids,
+      .s = mx::Device::cpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .tile_size = tile_size,
+          .use_backgrounds = backgrounds.size() != 0,
+          .use_masks = masks.size() != 0,
+          .packed = means2d.ndim() == 2,
+      },
+  };
+
+  auto outputs = gsplat_core::gsplat_rasterize_to_pixels_3dgs(input);
+  nb::dict result;
+  result["render_colors"] = outputs[gsplat_core::kRenderColors];
+  result["render_alphas"] = outputs[gsplat_core::kRenderAlphas];
+  result["last_ids"] = outputs[gsplat_core::kLastIds];
+  return result;
+}
+
 }  // namespace
 
 NB_MODULE(_gsplat_core, m) {
@@ -201,4 +244,11 @@ NB_MODULE(_gsplat_core, m) {
       "I"_a,
       "tile_width"_a,
       "tile_height"_a);
+  m.def(
+      "rasterize_to_pixels_3dgs_forward",
+      &rasterize_to_pixels_3dgs_forward,
+      "inputs"_a,
+      "image_width"_a,
+      "image_height"_a,
+      "tile_size"_a);
 }

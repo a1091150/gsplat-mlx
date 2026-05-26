@@ -114,7 +114,7 @@
 - [ ] `projection_ewa_3dgs_packed_fwd`
 - [x] `intersect_tile`
 - [x] `intersect_offset`
-- [ ] `rasterize_to_pixels_3dgs_fwd`
+- [x] `rasterize_to_pixels_3dgs_fwd`
 - [ ] `rasterize_to_indices_3dgs`
 
 ## Excluded CUDA Ops
@@ -138,7 +138,7 @@
 ## Planned Subtasks
 - [ ] Task 3.1: Projection 3DGS fused forward numeric parity.
 - [x] Task 3.2: Intersect tile / intersect offset forward.
-- [ ] Task 3.3: Rasterize to pixels 3DGS forward.
+- [x] Task 3.3: Rasterize to pixels 3DGS forward.
 - [ ] Task 3.4: Spherical harmonics forward.
 - [ ] Task 3.5: Quat/scale to covariance/precision forward.
 
@@ -178,6 +178,20 @@
 - [ ] Support segmented sort.
 - [ ] CUDA/PyTorch numeric parity.
 
+## Task 3.3 - Rasterize To Pixels 3DGS Forward
+- [x] Add `gsplat_core/include/gsplat_rasterize.h`.
+- [x] Add `gsplat_core/gsplat_rasterize.cpp`.
+- [x] Add `gsplat_core/metal/gsplat_rasterize.metal`.
+- [x] Expose `rasterize_to_pixels_3dgs_forward(...)` from `_gsplat_core`.
+- [x] Support dense first-version C++ reference path.
+- [x] Support front-to-back alpha compositing.
+- [x] Support optional backgrounds.
+- [x] Add C++ smoke coverage for render colors, render alphas, and last ids.
+- [ ] Move rasterization from C++ reference path to Metal kernels.
+- [ ] Support masks.
+- [ ] Support packed path.
+- [ ] CUDA/PyTorch numeric parity.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -193,7 +207,7 @@
 - [ ] `projection_ewa_3dgs_packed_forward(...)`
 - [x] `intersect_tile_forward(...)`
 - [x] `intersect_offset_forward(...)`
-- [ ] `rasterize_to_pixels_3dgs_forward(...)`
+- [x] `rasterize_to_pixels_3dgs_forward(...)`
 - [ ] `rasterize_to_indices_3dgs_forward(...)`
 
 ## Notes
@@ -212,7 +226,7 @@
 ## Planned Scripts
 - [x] `scripts/test/projection_ewa_3dgs_fused_forward.py`
 - [x] `scripts/test/intersect_tile_forward.py`
-- [ ] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
+- [x] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
 - [ ] `scripts/test/spherical_harmonics_forward.py`
 - [ ] `scripts/test/quat_scale_to_covar_preci_forward.py`
 
