@@ -30,6 +30,7 @@ python/mlx/share
 python/mlx/include
 .Python
 build/
+build-*/
 build_xcode/
 develop-eggs/
 dist/
@@ -284,4 +285,5 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/swift,swiftpackagemanager,swiftpm,macos,windows,linux,xcode
 
 submodules/*
-
+build/
+build-*/
