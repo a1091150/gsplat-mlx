@@ -147,6 +147,7 @@
 - [x] Task 3.9: Spherical harmonics MLX Primitive + Metal kernel.
 - [x] Task 3.10: Quat/scale covariance/precision MLX Primitive + Metal kernel.
 - [x] Task 3.11A: Intersect tile count MLX Primitive + Metal kernel.
+- [x] Task 3.11B: Intersect offset MLX Primitive + Metal kernel.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -182,6 +183,9 @@
 - [x] Add `GSPlatIntersectTileCount` MLX Primitive.
 - [x] Add Metal kernel `gsplat_intersect_tile_count_kernel`.
 - [x] Validate dense AABB tile count on GPU.
+- [x] Add `GSPlatIntersectOffset` MLX Primitive.
+- [x] Add Metal kernel `gsplat_intersect_offset_kernel`.
+- [x] Validate dense sorted `isect_ids` offset generation on GPU.
 - [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
@@ -302,6 +306,16 @@
 - [ ] Use tile count primitive inside a future full GPU intersect path.
 - [ ] Add encode/prefix/sort GPU path.
 
+## Task 3.11B - Intersect Offset MLX Primitive + Metal Kernel
+- [x] Add `GSPlatIntersectOffset` Primitive.
+- [x] Add Metal kernel `gsplat_intersect_offset_kernel`.
+- [x] Preserve CPU fallback with a lower-bound reference implementation.
+- [x] Route Python binding `intersect_offset_forward` through GPU.
+- [x] Add C++/Metal smoke coverage for sorted dense AABB `isect_ids`.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [ ] Compare against exported CUDA `.npz` reference.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -363,4 +377,5 @@
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
 - [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
 - [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
+- [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

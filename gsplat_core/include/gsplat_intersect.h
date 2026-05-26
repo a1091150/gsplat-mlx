@@ -51,6 +51,12 @@ mlx::core::array gsplat_intersect_offset(
     int tile_height,
     mlx::core::StreamOrDevice s = mlx::core::Device::cpu);
 
+struct IntersectOffsetParams {
+  int I;
+  int tile_width;
+  int tile_height;
+};
+
 class GSPlatIntersectTileCount : public mlx::core::Primitive {
  public:
   GSPlatIntersectTileCount(mlx::core::Stream stream, IntersectTileParams params)
@@ -84,6 +90,41 @@ class GSPlatIntersectTileCount : public mlx::core::Primitive {
 
  private:
   IntersectTileParams params_;
+};
+
+class GSPlatIntersectOffset : public mlx::core::Primitive {
+ public:
+  GSPlatIntersectOffset(mlx::core::Stream stream, IntersectOffsetParams params)
+      : mlx::core::Primitive(stream), params_(params) {}
+
+  void eval_cpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+  void eval_gpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+
+  std::vector<mlx::core::array> jvp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& tangents,
+      const std::vector<int>& argnums) override;
+
+  std::vector<mlx::core::array> vjp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& cotangents,
+      const std::vector<int>& argnums,
+      const std::vector<mlx::core::array>& outputs) override;
+
+  std::pair<std::vector<mlx::core::array>, std::vector<int>> vmap(
+      const std::vector<mlx::core::array>& inputs,
+      const std::vector<int>& axes) override;
+
+  const char* name() const override {
+    return "GSPlatIntersectOffset";
+  }
+
+  bool is_equivalent(const mlx::core::Primitive& other) const override;
+
+ private:
+  IntersectOffsetParams params_;
 };
 
 }  // namespace gsplat_core

@@ -9,6 +9,13 @@ struct IntersectTileCountKernelParams {
   uint tile_height;
 };
 
+struct IntersectOffsetKernelParams {
+  uint n_isects;
+  uint n_offsets;
+  uint n_tiles;
+  uint tile_n_bits;
+};
+
 inline int clamp_tile(int value, uint upper) {
   return min(max(0, value), int(upper));
 }
@@ -42,4 +49,32 @@ kernel void gsplat_intersect_tile_count_kernel(
   int max_y = clamp_tile(int(ceil(tile_y + tile_radius_y)), params.tile_height);
 
   tiles_per_gauss[idx] = (max_y - min_y) * (max_x - min_x);
+}
+
+kernel void gsplat_intersect_offset_kernel(
+    constant IntersectOffsetKernelParams& params [[buffer(0)]],
+    const device long* isect_ids [[buffer(1)]],
+    device int* offsets [[buffer(2)]],
+    uint idx [[thread_position_in_grid]]) {
+  if (idx >= params.n_offsets) {
+    return;
+  }
+
+  uint image_id = idx / params.n_tiles;
+  uint tile_id = idx % params.n_tiles;
+  long key = (long(image_id) << params.tile_n_bits) | long(tile_id);
+
+  uint lo = 0;
+  uint hi = params.n_isects;
+  while (lo < hi) {
+    uint mid = lo + (hi - lo) / 2;
+    long encoded = isect_ids[mid] >> 32;
+    if (encoded < key) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+
+  offsets[idx] = int(lo);
 }

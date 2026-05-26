@@ -165,7 +165,7 @@ mx::array intersect_offset_forward(
     int tile_width,
     int tile_height) {
   return gsplat_core::gsplat_intersect_offset(
-      isect_ids, I, tile_width, tile_height, mx::Device::cpu);
+      isect_ids, I, tile_width, tile_height, mx::Device::gpu);
 }
 
 nb::dict rasterize_to_pixels_3dgs_forward(

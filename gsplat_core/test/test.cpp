@@ -482,6 +482,41 @@ void test_intersect_tile_count_gpu_dense_aabb() {
   std::cout << "intersect_tile_count GPU dense AABB smoke ok\n";
 }
 
+void test_intersect_offset_gpu_dense_aabb() {
+  mx::array isect_ids(
+      {
+          (static_cast<int64_t>(0) << 32) | 0x3f800000LL,
+          (static_cast<int64_t>(1) << 32) | 0x3f800000LL,
+          (static_cast<int64_t>(4) << 32) | 0x3f800000LL,
+          (static_cast<int64_t>(5) << 32) | 0x3f800000LL,
+          (static_cast<int64_t>(10) << 32) | 0x3f000000LL,
+          (static_cast<int64_t>(11) << 32) | 0x3f000000LL,
+          (static_cast<int64_t>(14) << 32) | 0x3f000000LL,
+          (static_cast<int64_t>(15) << 32) | 0x3f000000LL,
+      },
+      {8},
+      mx::int64);
+  mx::array offsets =
+      gsplat_core::gsplat_intersect_offset(isect_ids, 1, 4, 4, mx::Device::gpu);
+  expect_shape(offsets, {1, 4, 4}, "intersect offsets gpu");
+  expect_dtype(offsets, mx::int32, "intersect offsets gpu");
+  offsets.eval();
+
+  const int expected_offsets[16] = {
+      0, 1, 2, 2,
+      2, 3, 4, 4,
+      4, 4, 4, 5,
+      6, 6, 6, 7,
+  };
+  const int32_t* offset_data = offsets.data<int32_t>();
+  for (int i = 0; i < 16; ++i) {
+    expect(offset_data[i] == expected_offsets[i],
+           "intersect offset gpu mismatch at " + std::to_string(i));
+  }
+
+  std::cout << "intersect_offset GPU dense AABB smoke ok\n";
+}
+
 void test_rasterize_to_pixels_3dgs_dense_reference() {
   mx::array means2d({1.0f, 1.0f}, {1, 1, 2}, mx::float32);
   mx::array conics({1.0f, 0.0f, 1.0f}, {1, 1, 3}, mx::float32);
@@ -986,6 +1021,7 @@ int main() {
     test_projection_ewa_3dgs_fused_gpu_numeric();
     test_intersect_tile_and_offset_dense_aabb();
     test_intersect_tile_count_gpu_dense_aabb();
+    test_intersect_offset_gpu_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
