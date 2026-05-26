@@ -979,6 +979,80 @@ void test_rasterize_to_pixels_3dgs_gpu_reference() {
   std::cout << "rasterize_to_pixels_3dgs GPU smoke ok\n";
 }
 
+void test_rasterize_to_pixels_3dgs_masks(mx::StreamOrDevice device,
+                                         const std::string& name) {
+  mx::array means2d({1.0f, 1.0f}, {1, 1, 2}, mx::float32);
+  mx::array conics({1.0f, 0.0f, 1.0f}, {1, 1, 3}, mx::float32);
+  mx::array colors({1.0f, 0.0f, 0.0f}, {1, 1, 3}, mx::float32);
+  mx::array opacities({0.5f}, {1, 1}, mx::float32);
+  mx::array backgrounds({0.1f, 0.2f, 0.3f}, {1, 3}, mx::float32);
+  mx::array masks({true, false}, {1, 1, 2}, mx::bool_);
+  mx::array tile_offsets({0, 1}, {1, 1, 2}, mx::int32);
+  mx::array flatten_ids({0}, {1}, mx::int32);
+
+  gsplat_core::RasterizeToPixels3DGSInput input = {
+      .means2d = means2d,
+      .conics = conics,
+      .colors = colors,
+      .opacities = opacities,
+      .backgrounds = backgrounds,
+      .masks = masks,
+      .tile_offsets = tile_offsets,
+      .flatten_ids = flatten_ids,
+      .s = device,
+      .params = {
+          .image_width = 4,
+          .image_height = 2,
+          .tile_size = 2,
+          .use_backgrounds = true,
+          .use_masks = true,
+          .packed = false,
+      },
+  };
+
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs(input);
+  expect_shape(outputs[gsplat_core::kRenderColors], {1, 2, 4, 3},
+               name + " render_colors");
+  expect_shape(outputs[gsplat_core::kRenderAlphas], {1, 2, 4, 1},
+               name + " render_alphas");
+  expect_shape(outputs[gsplat_core::kLastIds], {1, 2, 4},
+               name + " last_ids");
+
+  mx::eval(outputs);
+  const float expected_alpha = 0.5f * std::exp(-0.25f);
+  const float expected_T = 1.0f - expected_alpha;
+  const float rendered_rgb[3] = {
+      expected_alpha + expected_T * 0.1f,
+      expected_T * 0.2f,
+      expected_T * 0.3f,
+  };
+  const float background_rgb[3] = {0.1f, 0.2f, 0.3f};
+  const float* render_colors = outputs[gsplat_core::kRenderColors].data<float>();
+  const float* render_alphas = outputs[gsplat_core::kRenderAlphas].data<float>();
+  const int32_t* last_ids = outputs[gsplat_core::kLastIds].data<int32_t>();
+  for (int y = 0; y < 2; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      const int pixel = y * 4 + x;
+      const bool masked_out_tile = x >= 2;
+      expect_close(render_alphas[pixel],
+                   masked_out_tile ? 0.0f : expected_alpha,
+                   1.0e-5f,
+                   name + " alpha");
+      expect(last_ids[pixel] == 0, name + " last id mismatch");
+      for (int channel = 0; channel < 3; ++channel) {
+        expect_close(render_colors[pixel * 3 + channel],
+                     masked_out_tile ? background_rgb[channel]
+                                     : rendered_rgb[channel],
+                     1.0e-5f,
+                     name + " color");
+      }
+    }
+  }
+
+  std::cout << name << " masks smoke ok\n";
+}
+
 void test_spherical_harmonics_forward_reference() {
   mx::array dirs(
       {0.0f, 0.0f, 1.0f,
@@ -1519,6 +1593,10 @@ int main() {
     test_intersect_offset_gpu_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_rasterize_to_pixels_3dgs_gpu_reference();
+    test_rasterize_to_pixels_3dgs_masks(mx::Device::cpu,
+                                        "rasterize_to_pixels_3dgs CPU");
+    test_rasterize_to_pixels_3dgs_masks(mx::Device::gpu,
+                                        "rasterize_to_pixels_3dgs GPU");
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
     test_spherical_harmonics_forward_gpu_degree4_masks();

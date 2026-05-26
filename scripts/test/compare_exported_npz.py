@@ -106,16 +106,20 @@ def compare_intersect(data: np.lib.npyio.NpzFile) -> list[bool]:
 
 
 def compare_rasterize(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "means2d": mx_array(data, "input__means2d"),
+        "conics": mx_array(data, "input__conics"),
+        "colors": mx_array(data, "input__colors"),
+        "opacities": mx_array(data, "input__opacities"),
+        "backgrounds": mx_array(data, "input__backgrounds"),
+        "tile_offsets": mx_array(data, "input__tile_offsets"),
+        "flatten_ids": mx_array(data, "input__flatten_ids"),
+    }
+    if "input__masks" in data.files:
+        inputs["masks"] = mx_array(data, "input__masks")
+
     actual = rasterize_to_pixels_3dgs_forward(
-        {
-            "means2d": mx_array(data, "input__means2d"),
-            "conics": mx_array(data, "input__conics"),
-            "colors": mx_array(data, "input__colors"),
-            "opacities": mx_array(data, "input__opacities"),
-            "backgrounds": mx_array(data, "input__backgrounds"),
-            "tile_offsets": mx_array(data, "input__tile_offsets"),
-            "flatten_ids": mx_array(data, "input__flatten_ids"),
-        },
+        inputs,
         image_width=int(scalar(data, "input__image_width")),
         image_height=int(scalar(data, "input__image_height")),
         tile_size=int(scalar(data, "input__tile_size")),
@@ -249,6 +253,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
 EXTRA_COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_edge_cases.npz": compare_projection,
     "quat_scale_to_covar_preci_edge_cases.npz": compare_quat_scale,
+    "rasterize_to_pixels_3dgs_masks.npz": compare_rasterize,
     "spherical_harmonics_degree4_masks.npz": compare_spherical_harmonics,
 }
 

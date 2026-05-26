@@ -155,6 +155,7 @@
 - [x] Task 3.13: Projection 3DGS fused forward parity cleanup.
 - [x] Task 3.14: Spherical harmonics exported parity cleanup.
 - [x] Task 3.15: Quat/scale covariance exported parity cleanup.
+- [x] Task 3.16: Rasterize to pixels 3DGS masks path.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -221,7 +222,7 @@
 - [x] Keep CPU reference path as fallback.
 - [x] Add C++/Metal GPU smoke coverage for render colors, render alphas, and last ids.
 - [x] Validate Python-facing rasterize output against exported CUDA `.npz`.
-- [ ] Support masks.
+- [x] Support masks.
 - [ ] Support packed path.
 - [ ] CUDA/PyTorch numeric parity.
 
@@ -425,6 +426,17 @@
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate exported `.npz` parity for the existing quat/scale fixture.
 
+## Task 3.16 - Rasterize To Pixels 3DGS Masks Path
+- [x] Match gsplat CUDA mask semantics for dense rasterize tile masks.
+- [x] Accept optional `masks` with the same shape as `tile_offsets`.
+- [x] Skip masked-out tiles before compositing and write background color with zero alpha.
+- [x] Add C++ CPU reference support for rasterize masks.
+- [x] Add Metal support for rasterize masks.
+- [x] Add C++/Metal smoke coverage for a two-tile masked render.
+- [x] Add CUDA export script `scripts/export_ref/export_rasterize_to_pixels_3dgs_masks.py`.
+- [x] Update exported `.npz` compare support for optional rasterize masks fixtures.
+- [x] Keep masks CUDA fixture optional until exported from a CUDA machine.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -494,6 +506,7 @@
 - [x] Intersect tile staged GPU smoke validates prefix, encode, sort, and reorder.
 - [x] Python-facing dense `intersect_tile_forward` matches exported CUDA `.npz` through staged GPU path.
 - [x] Rasterize to pixels C++/Metal smoke validates dense GPU compositing.
+- [x] Rasterize to pixels C++/Metal smoke validates dense GPU tile masks.
 - [x] Python-facing dense `rasterize_to_pixels_3dgs_forward` matches exported CUDA `.npz` through Metal path.
 - [x] Projection C++/Metal smoke validates dense culling and empty compensation behavior.
 - [x] Existing Python-facing dense `projection_ewa_3dgs_fused_forward` matches exported CUDA `.npz`.

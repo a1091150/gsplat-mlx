@@ -35,16 +35,13 @@ struct RasterizeToPixels3DGSKernelParams {
   uint32_t tile_height;
   uint32_t n_isects;
   uint32_t use_backgrounds;
+  uint32_t use_masks;
 };
 
 void validate_rasterize_input(const RasterizeToPixels3DGSInput& input) {
   if (input.params.packed) {
     throw std::runtime_error(
         "rasterize_to_pixels_3dgs packed path is not implemented yet.");
-  }
-  if (input.params.use_masks) {
-    throw std::runtime_error(
-        "rasterize_to_pixels_3dgs masks path is not implemented yet.");
   }
   if (input.means2d.ndim() < 3 ||
       input.means2d.shape(static_cast<int>(input.means2d.ndim()) - 1) != 2) {
@@ -68,6 +65,18 @@ void validate_rasterize_input(const RasterizeToPixels3DGSInput& input) {
   }
   if (input.flatten_ids.ndim() != 1) {
     throw std::runtime_error("flatten_ids must have shape [n_isects].");
+  }
+  if (input.params.use_masks) {
+    if (input.masks.ndim() != input.tile_offsets.ndim()) {
+      throw std::runtime_error(
+          "masks must have the same shape as tile_offsets.");
+    }
+    for (int i = 0; i < static_cast<int>(input.masks.ndim()); ++i) {
+      if (input.masks.shape(i) != input.tile_offsets.shape(i)) {
+        throw std::runtime_error(
+            "masks must have the same shape as tile_offsets.");
+      }
+    }
   }
 }
 
@@ -151,6 +160,7 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
       mx::contiguous(input.colors),
       mx::contiguous(input.opacities),
       mx::contiguous(input.backgrounds),
+      mx::contiguous(input.masks),
       mx::contiguous(input.tile_offsets),
       mx::contiguous(input.flatten_ids),
   };
@@ -165,10 +175,11 @@ void GSPlatRasterizeToPixels3DGS::eval_cpu(
   const auto& colors = inputs[2];
   const auto& opacities = inputs[3];
   const auto& backgrounds = inputs[4];
-  const auto& tile_offsets = inputs[5];
-  const auto& flatten_ids = inputs[6];
-  mx::eval(means2d, conics, colors, opacities, backgrounds, tile_offsets,
-           flatten_ids);
+  const auto& masks = inputs[5];
+  const auto& tile_offsets = inputs[6];
+  const auto& flatten_ids = inputs[7];
+  mx::eval(means2d, conics, colors, opacities, backgrounds, masks,
+           tile_offsets, flatten_ids);
 
   for (auto& out : outputs) {
     out.set_data(mx::allocator::malloc(out.nbytes()));
@@ -191,6 +202,7 @@ void GSPlatRasterizeToPixels3DGS::eval_cpu(
   const float* opacities_data = opacities.data<float>();
   const float* backgrounds_data =
       params_.use_backgrounds ? backgrounds.data<float>() : nullptr;
+  const bool* masks_data = params_.use_masks ? masks.data<bool>() : nullptr;
   const int32_t* tile_offsets_data = tile_offsets.data<int32_t>();
   const int32_t* flatten_ids_data = flatten_ids.data<int32_t>();
   float* render_colors = outputs[kRenderColors].data<float>();
@@ -207,6 +219,8 @@ void GSPlatRasterizeToPixels3DGS::eval_cpu(
             (image_id == I - 1 && tile_id == tile_width * tile_height - 1)
                 ? n_isects
                 : tile_offsets_data[offset_index + 1];
+        const bool skip_tile =
+            masks_data != nullptr && !masks_data[offset_index];
 
         for (int local_y = 0; local_y < params_.tile_size; ++local_y) {
           const int y = tile_y * params_.tile_size + local_y;
@@ -227,7 +241,7 @@ void GSPlatRasterizeToPixels3DGS::eval_cpu(
             float T = 1.0f;
             int32_t cur_idx = 0;
 
-            for (int idx = range_start; idx < range_end; ++idx) {
+            for (int idx = range_start; !skip_tile && idx < range_end; ++idx) {
               const int g = flatten_ids_data[idx];
               const float mean_x = means_data[g * 2];
               const float mean_y = means_data[g * 2 + 1];
@@ -289,8 +303,9 @@ void GSPlatRasterizeToPixels3DGS::eval_gpu(
   const auto& colors = inputs[2];
   const auto& opacities = inputs[3];
   const auto& backgrounds = inputs[4];
-  const auto& tile_offsets = inputs[5];
-  const auto& flatten_ids = inputs[6];
+  const auto& masks = inputs[5];
+  const auto& tile_offsets = inputs[6];
+  const auto& flatten_ids = inputs[7];
 
   const uint32_t num_pixels =
       static_cast<uint32_t>(outputs[kLastIds].size());
@@ -315,6 +330,7 @@ void GSPlatRasterizeToPixels3DGS::eval_gpu(
       .tile_height = static_cast<uint32_t>(tile_height),
       .n_isects = static_cast<uint32_t>(flatten_ids.size()),
       .use_backgrounds = static_cast<uint32_t>(params_.use_backgrounds),
+      .use_masks = static_cast<uint32_t>(params_.use_masks),
   };
 
   auto& s = stream();
@@ -330,11 +346,12 @@ void GSPlatRasterizeToPixels3DGS::eval_gpu(
   compute_encoder.set_input_array(colors, 3);
   compute_encoder.set_input_array(opacities, 4);
   compute_encoder.set_input_array(backgrounds, 5);
-  compute_encoder.set_input_array(tile_offsets, 6);
-  compute_encoder.set_input_array(flatten_ids, 7);
-  compute_encoder.set_output_array(outputs[kRenderColors], 8);
-  compute_encoder.set_output_array(outputs[kRenderAlphas], 9);
-  compute_encoder.set_output_array(outputs[kLastIds], 10);
+  compute_encoder.set_input_array(masks, 6);
+  compute_encoder.set_input_array(tile_offsets, 7);
+  compute_encoder.set_input_array(flatten_ids, 8);
+  compute_encoder.set_output_array(outputs[kRenderColors], 9);
+  compute_encoder.set_output_array(outputs[kRenderAlphas], 10);
+  compute_encoder.set_output_array(outputs[kLastIds], 11);
 
   const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
   const size_t tgp_size =
