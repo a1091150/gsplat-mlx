@@ -11,6 +11,7 @@
 #include <mlx/ops.h>
 
 #include "../include/dummy.h"
+#include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
 
 namespace nb = nanobind;
@@ -25,7 +26,7 @@ const mx::array& require_key(
   auto it = inputs.find(key);
   if (it == inputs.end()) {
     throw std::runtime_error(
-        std::string("projection_ewa_3dgs_fused_forward missing input: ") + key);
+        std::string("gsplat_core binding missing input: ") + key);
   }
   return it->second;
 }
@@ -109,6 +110,61 @@ nb::dict projection_ewa_3dgs_fused_forward(
   return result;
 }
 
+nb::dict intersect_tile_forward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    int I,
+    int tile_size,
+    int tile_width,
+    int tile_height,
+    bool sort,
+    bool segmented) {
+  const auto& means2d = require_key(inputs, "means2d");
+  const auto& radii = require_key(inputs, "radii");
+  const auto& depths = require_key(inputs, "depths");
+  mx::array conics = get_or_empty(inputs, "conics");
+  mx::array opacities = get_or_empty(inputs, "opacities");
+  mx::array image_ids = get_or_empty(inputs, "image_ids");
+  mx::array gaussian_ids = get_or_empty(inputs, "gaussian_ids");
+
+  gsplat_core::IntersectTileInput input = {
+      .means2d = means2d,
+      .radii = radii,
+      .depths = depths,
+      .conics = conics,
+      .opacities = opacities,
+      .image_ids = image_ids,
+      .gaussian_ids = gaussian_ids,
+      .s = mx::Device::cpu,
+      .params = {
+          .I = I,
+          .tile_size = tile_size,
+          .tile_width = tile_width,
+          .tile_height = tile_height,
+          .sort = sort,
+          .segmented = segmented,
+          .packed = image_ids.size() != 0 || gaussian_ids.size() != 0,
+          .use_conics = conics.size() != 0,
+          .use_opacities = opacities.size() != 0,
+      },
+  };
+
+  auto outputs = gsplat_core::gsplat_intersect_tile(input);
+  nb::dict result;
+  result["tiles_per_gauss"] = outputs[gsplat_core::kTilesPerGauss];
+  result["isect_ids"] = outputs[gsplat_core::kIsectIds];
+  result["flatten_ids"] = outputs[gsplat_core::kFlattenIds];
+  return result;
+}
+
+mx::array intersect_offset_forward(
+    const mx::array& isect_ids,
+    int I,
+    int tile_width,
+    int tile_height) {
+  return gsplat_core::gsplat_intersect_offset(
+      isect_ids, I, tile_width, tile_height, mx::Device::cpu);
+}
+
 }  // namespace
 
 NB_MODULE(_gsplat_core, m) {
@@ -128,4 +184,21 @@ NB_MODULE(_gsplat_core, m) {
       "radius_clip"_a = 0.0f,
       "calc_compensations"_a = false,
       "camera_model"_a = 0);
+  m.def(
+      "intersect_tile_forward",
+      &intersect_tile_forward,
+      "inputs"_a,
+      "I"_a,
+      "tile_size"_a,
+      "tile_width"_a,
+      "tile_height"_a,
+      "sort"_a = true,
+      "segmented"_a = false);
+  m.def(
+      "intersect_offset_forward",
+      &intersect_offset_forward,
+      "isect_ids"_a,
+      "I"_a,
+      "tile_width"_a,
+      "tile_height"_a);
 }

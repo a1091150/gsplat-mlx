@@ -1,0 +1,261 @@
+#include "include/gsplat_intersect.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "mlx/mlx.h"
+#include "mlx/ops.h"
+
+namespace mx = mlx::core;
+
+namespace gsplat_core {
+namespace {
+
+struct TileRect {
+  int min_x;
+  int min_y;
+  int max_x;
+  int max_y;
+};
+
+int floor_log2_plus_one(int value) {
+  if (value <= 0) {
+    throw std::runtime_error("intersect expects positive image/tile counts.");
+  }
+  return static_cast<int>(std::floor(std::log2(static_cast<float>(value)))) + 1;
+}
+
+TileRect aabb_tile_rect(float mean_x,
+                        float mean_y,
+                        int radius_x,
+                        int radius_y,
+                        int tile_size,
+                        int tile_width,
+                        int tile_height) {
+  if (radius_x <= 0 || radius_y <= 0) {
+    return {0, 0, 0, 0};
+  }
+
+  const float tile_radius_x =
+      static_cast<float>(radius_x) / static_cast<float>(tile_size);
+  const float tile_radius_y =
+      static_cast<float>(radius_y) / static_cast<float>(tile_size);
+  const float tile_x = mean_x / static_cast<float>(tile_size);
+  const float tile_y = mean_y / static_cast<float>(tile_size);
+
+  TileRect rect = {};
+  rect.min_x = std::min(
+      std::max(0, static_cast<int>(std::floor(tile_x - tile_radius_x))),
+      tile_width);
+  rect.min_y = std::min(
+      std::max(0, static_cast<int>(std::floor(tile_y - tile_radius_y))),
+      tile_height);
+  rect.max_x = std::min(
+      std::max(0, static_cast<int>(std::ceil(tile_x + tile_radius_x))),
+      tile_width);
+  rect.max_y = std::min(
+      std::max(0, static_cast<int>(std::ceil(tile_y + tile_radius_y))),
+      tile_height);
+  return rect;
+}
+
+int64_t encode_isect_id(int image_id,
+                        int tile_id,
+                        float depth,
+                        int tile_n_bits) {
+  int32_t depth_i32 = 0;
+  std::memcpy(&depth_i32, &depth, sizeof(float));
+  const int64_t iid_enc =
+      static_cast<int64_t>(image_id) << (32 + tile_n_bits);
+  const int64_t tile_enc = static_cast<int64_t>(tile_id) << 32;
+  return iid_enc | tile_enc |
+         static_cast<int64_t>(static_cast<uint32_t>(depth_i32));
+}
+
+void validate_intersect_tile_input(const IntersectTileInput& input) {
+  if (input.params.packed) {
+    throw std::runtime_error(
+        "intersect_tile packed path is not implemented yet.");
+  }
+  if (input.params.segmented) {
+    throw std::runtime_error(
+        "intersect_tile segmented sort is not implemented yet.");
+  }
+  if (input.params.use_conics || input.params.use_opacities) {
+    throw std::runtime_error(
+        "intersect_tile AccuTile conics/opacities path is not implemented yet.");
+  }
+  if (input.means2d.ndim() < 3 ||
+      input.means2d.shape(static_cast<int>(input.means2d.ndim()) - 1) != 2) {
+    throw std::runtime_error("means2d must have shape [..., N, 2].");
+  }
+  if (input.radii.ndim() != input.means2d.ndim() ||
+      input.radii.shape(static_cast<int>(input.radii.ndim()) - 1) != 2) {
+    throw std::runtime_error("radii must have shape [..., N, 2].");
+  }
+  if (input.depths.ndim() + 1 != input.means2d.ndim()) {
+    throw std::runtime_error("depths must have shape [..., N].");
+  }
+}
+
+mx::Shape scalar_shape_from_depths(const mx::array& depths) {
+  mx::Shape shape;
+  shape.reserve(depths.ndim());
+  for (int i = 0; i < static_cast<int>(depths.ndim()); ++i) {
+    shape.push_back(depths.shape(i));
+  }
+  return shape;
+}
+
+}  // namespace
+
+std::vector<mx::array> gsplat_intersect_tile(const IntersectTileInput& input) {
+  validate_intersect_tile_input(input);
+
+  mx::array means2d = mx::contiguous(input.means2d);
+  mx::array radii = mx::contiguous(input.radii);
+  mx::array depths = mx::contiguous(input.depths);
+  mx::eval(means2d, radii, depths);
+
+  const int ndim = static_cast<int>(means2d.ndim());
+  const int n = means2d.shape(ndim - 2);
+  const int numel = static_cast<int>(depths.size());
+  const int I = input.params.I;
+  if (I <= 0 || numel % I != 0 || numel != I * n) {
+    throw std::runtime_error(
+        "intersect_tile dense path expects depths size to equal I * N.");
+  }
+
+  const int n_tiles = input.params.tile_width * input.params.tile_height;
+  const int tile_n_bits = floor_log2_plus_one(n_tiles);
+  const int image_n_bits = floor_log2_plus_one(I);
+  if (image_n_bits + tile_n_bits > 32) {
+    throw std::runtime_error(
+        "intersect_tile image id and tile id require more than 32 bits.");
+  }
+
+  const float* means_data = means2d.data<float>();
+  const int32_t* radii_data = radii.data<int32_t>();
+  const float* depths_data = depths.data<float>();
+
+  std::vector<int32_t> tiles_per_gauss(static_cast<size_t>(numel), 0);
+  std::vector<int64_t> isect_ids;
+  std::vector<int32_t> flatten_ids;
+
+  for (int idx = 0; idx < numel; ++idx) {
+    const int image_id = idx / n;
+    const TileRect rect = aabb_tile_rect(
+        means_data[idx * 2],
+        means_data[idx * 2 + 1],
+        radii_data[idx * 2],
+        radii_data[idx * 2 + 1],
+        input.params.tile_size,
+        input.params.tile_width,
+        input.params.tile_height);
+    const int count = (rect.max_y - rect.min_y) * (rect.max_x - rect.min_x);
+    tiles_per_gauss[static_cast<size_t>(idx)] = static_cast<int32_t>(count);
+
+    for (int tile_y = rect.min_y; tile_y < rect.max_y; ++tile_y) {
+      for (int tile_x = rect.min_x; tile_x < rect.max_x; ++tile_x) {
+        const int tile_id = tile_y * input.params.tile_width + tile_x;
+        isect_ids.push_back(encode_isect_id(
+            image_id, tile_id, depths_data[idx], tile_n_bits));
+        flatten_ids.push_back(static_cast<int32_t>(idx));
+      }
+    }
+  }
+
+  if (input.params.sort) {
+    std::vector<size_t> order(isect_ids.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+      order[i] = i;
+    }
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+      return isect_ids[a] < isect_ids[b];
+    });
+
+    std::vector<int64_t> sorted_ids(isect_ids.size());
+    std::vector<int32_t> sorted_flatten_ids(flatten_ids.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+      sorted_ids[i] = isect_ids[order[i]];
+      sorted_flatten_ids[i] = flatten_ids[order[i]];
+    }
+    isect_ids = std::move(sorted_ids);
+    flatten_ids = std::move(sorted_flatten_ids);
+  }
+
+  std::vector<mx::array> outputs;
+  outputs.reserve(3);
+  outputs.push_back(mx::array(
+      tiles_per_gauss.begin(), scalar_shape_from_depths(depths), mx::int32));
+  outputs.push_back(mx::array(
+      isect_ids.begin(),
+      mx::Shape{static_cast<int>(isect_ids.size())},
+      mx::int64));
+  outputs.push_back(mx::array(
+      flatten_ids.begin(),
+      mx::Shape{static_cast<int>(flatten_ids.size())},
+      mx::int32));
+  return outputs;
+}
+
+mx::array gsplat_intersect_offset(const mx::array& isect_ids,
+                                  int I,
+                                  int tile_width,
+                                  int tile_height,
+                                  mx::StreamOrDevice) {
+  mx::array ids = mx::contiguous(isect_ids);
+  mx::eval(ids);
+
+  const int n_isects = static_cast<int>(ids.size());
+  const int n_tiles = tile_width * tile_height;
+  const int tile_n_bits = floor_log2_plus_one(n_tiles);
+  std::vector<int32_t> offsets(static_cast<size_t>(I * n_tiles), 0);
+
+  if (n_isects == 0) {
+    return mx::array(
+        offsets.begin(), mx::Shape{I, tile_height, tile_width}, mx::int32);
+  }
+
+  const int64_t* id_data = ids.data<int64_t>();
+  for (int idx = 0; idx < n_isects; ++idx) {
+    const int64_t isect_id_curr = id_data[idx] >> 32;
+    const int64_t iid_curr = isect_id_curr >> tile_n_bits;
+    const int64_t tid_curr = isect_id_curr & ((1 << tile_n_bits) - 1);
+    const int64_t id_curr = iid_curr * n_tiles + tid_curr;
+
+    if (idx == 0) {
+      for (int64_t i = 0; i < id_curr + 1; ++i) {
+        offsets[static_cast<size_t>(i)] = idx;
+      }
+    }
+    if (idx == n_isects - 1) {
+      for (int64_t i = id_curr + 1; i < I * n_tiles; ++i) {
+        offsets[static_cast<size_t>(i)] = n_isects;
+      }
+    }
+
+    if (idx > 0) {
+      const int64_t isect_id_prev = id_data[idx - 1] >> 32;
+      if (isect_id_prev == isect_id_curr) {
+        continue;
+      }
+      const int64_t iid_prev = isect_id_prev >> tile_n_bits;
+      const int64_t tid_prev = isect_id_prev & ((1 << tile_n_bits) - 1);
+      const int64_t id_prev = iid_prev * n_tiles + tid_prev;
+      for (int64_t i = id_prev + 1; i < id_curr + 1; ++i) {
+        offsets[static_cast<size_t>(i)] = idx;
+      }
+    }
+  }
+
+  return mx::array(
+      offsets.begin(), mx::Shape{I, tile_height, tile_width}, mx::int32);
+}
+
+}  // namespace gsplat_core

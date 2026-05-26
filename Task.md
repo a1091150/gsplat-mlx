@@ -112,8 +112,8 @@
 - [ ] `spherical_harmonics_fwd`
 - [x] `projection_ewa_3dgs_fused_fwd`
 - [ ] `projection_ewa_3dgs_packed_fwd`
-- [ ] `intersect_tile`
-- [ ] `intersect_offset`
+- [x] `intersect_tile`
+- [x] `intersect_offset`
 - [ ] `rasterize_to_pixels_3dgs_fwd`
 - [ ] `rasterize_to_indices_3dgs`
 
@@ -137,7 +137,7 @@
 
 ## Planned Subtasks
 - [ ] Task 3.1: Projection 3DGS fused forward numeric parity.
-- [ ] Task 3.2: Intersect tile / intersect offset forward.
+- [x] Task 3.2: Intersect tile / intersect offset forward.
 - [ ] Task 3.3: Rasterize to pixels 3DGS forward.
 - [ ] Task 3.4: Spherical harmonics forward.
 - [ ] Task 3.5: Quat/scale to covariance/precision forward.
@@ -158,8 +158,25 @@
 - [x] Support optional opacities and optional compensations output.
 - [x] Build through `make xcode-build`.
 - [x] Add C++ smoke coverage through `make codex-xcode-test`.
+- [x] Add fixed C++/Metal numeric smoke for pinhole quats/scales path.
+- [x] Add fixed C++/Metal numeric smoke for pinhole covars path.
 - [ ] CUDA/PyTorch numeric parity.
 - [ ] Packed projection forward.
+
+## Task 3.2 - Intersect Tile / Intersect Offset Forward
+- [x] Add `gsplat_core/include/gsplat_intersect.h`.
+- [x] Add `gsplat_core/gsplat_intersect.cpp`.
+- [x] Add `gsplat_core/metal/gsplat_intersect.metal`.
+- [x] Expose `intersect_tile_forward(...)` from `_gsplat_core`.
+- [x] Expose `intersect_offset_forward(...)` from `_gsplat_core`.
+- [x] Support dense AABB fallback path for `[I, N, ...]` style inputs.
+- [x] Support optional sort for dense AABB fallback path.
+- [x] Add C++ smoke coverage for tile counts, encoded tile ids, flatten ids, and offsets.
+- [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
+- [ ] Support packed path with `image_ids` and `gaussian_ids`.
+- [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
+- [ ] Support segmented sort.
+- [ ] CUDA/PyTorch numeric parity.
 
 ---
 
@@ -174,8 +191,8 @@
 - [ ] `spherical_harmonics_forward(...)`
 - [x] `projection_ewa_3dgs_fused_forward(...)`
 - [ ] `projection_ewa_3dgs_packed_forward(...)`
-- [ ] `intersect_tile_forward(...)`
-- [ ] `intersect_offset_forward(...)`
+- [x] `intersect_tile_forward(...)`
+- [x] `intersect_offset_forward(...)`
 - [ ] `rasterize_to_pixels_3dgs_forward(...)`
 - [ ] `rasterize_to_indices_3dgs_forward(...)`
 
@@ -194,7 +211,7 @@
 
 ## Planned Scripts
 - [x] `scripts/test/projection_ewa_3dgs_fused_forward.py`
-- [ ] `scripts/test/intersect_tile_forward.py`
+- [x] `scripts/test/intersect_tile_forward.py`
 - [ ] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
 - [ ] `scripts/test/spherical_harmonics_forward.py`
 - [ ] `scripts/test/quat_scale_to_covar_preci_forward.py`

@@ -1,14 +1,25 @@
 #include <iostream>
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "../include/dummy.h"
+#include "../include/gsplat_intersect.h"
 #include "../include/gsplat_projection.h"
 
 namespace mx = mlx::core;
 
 namespace {
+
+struct ProjectionExpected {
+  int radii[2];
+  float means2d[2];
+  float depth;
+  float conics[3];
+  float compensation;
+};
 
 void expect(bool condition, const std::string& message) {
   if (!condition) {
@@ -30,6 +41,89 @@ void expect_dtype(const mx::array& array,
                   mx::Dtype dtype,
                   const std::string& name) {
   expect(array.dtype().val() == dtype.val(), name + " dtype mismatch");
+}
+
+void expect_close(float actual,
+                  float expected,
+                  float tolerance,
+                  const std::string& name) {
+  if (std::fabs(actual - expected) > tolerance) {
+    throw std::runtime_error(
+        name + " mismatch: expected " + std::to_string(expected) +
+        ", got " + std::to_string(actual));
+  }
+}
+
+ProjectionExpected reference_pinhole_projection(float x,
+                                                float y,
+                                                float z,
+                                                float variance,
+                                                float opacity,
+                                                int image_width,
+                                                int image_height,
+                                                float fx,
+                                                float fy,
+                                                float cx,
+                                                float cy,
+                                                float eps2d,
+                                                bool calc_compensations) {
+  const float tan_fovx = 0.5f * static_cast<float>(image_width) / fx;
+  const float tan_fovy = 0.5f * static_cast<float>(image_height) / fy;
+  const float lim_x_pos =
+      (static_cast<float>(image_width) - cx) / fx + 0.3f * tan_fovx;
+  const float lim_x_neg = cx / fx + 0.3f * tan_fovx;
+  const float lim_y_pos =
+      (static_cast<float>(image_height) - cy) / fy + 0.3f * tan_fovy;
+  const float lim_y_neg = cy / fy + 0.3f * tan_fovy;
+
+  const float rz = 1.0f / z;
+  const float rz2 = rz * rz;
+  const float tx = z * std::min(lim_x_pos, std::max(-lim_x_neg, x * rz));
+  const float ty = z * std::min(lim_y_pos, std::max(-lim_y_neg, y * rz));
+
+  const float j00 = fx * rz;
+  const float j02 = -fx * tx * rz2;
+  const float j11 = fy * rz;
+  const float j12 = -fy * ty * rz2;
+
+  float cov00 = variance * (j00 * j00 + j02 * j02);
+  float cov01 = variance * (j02 * j12);
+  float cov11 = variance * (j11 * j11 + j12 * j12);
+  const float det_orig = cov00 * cov11 - cov01 * cov01;
+
+  cov00 += eps2d;
+  cov11 += eps2d;
+  const float det = cov00 * cov11 - cov01 * cov01;
+  const float min_compensation = 0.005f;
+  const float compensation = std::sqrt(std::max(
+      min_compensation * min_compensation, det_orig / det));
+
+  float extend = 3.33f;
+  float opacity_for_bounds = opacity;
+  if (calc_compensations) {
+    opacity_for_bounds *= compensation;
+  }
+  const float alpha_threshold = 1.0f / 255.0f;
+  if (opacity_for_bounds >= alpha_threshold) {
+    extend = std::min(
+        extend,
+        std::sqrt(2.0f * std::log(opacity_for_bounds / alpha_threshold)));
+  }
+
+  const float radius_x = std::ceil(extend * std::sqrt(cov00));
+  const float radius_y = std::ceil(extend * std::sqrt(cov11));
+
+  ProjectionExpected expected = {};
+  expected.radii[0] = static_cast<int>(radius_x);
+  expected.radii[1] = static_cast<int>(radius_y);
+  expected.means2d[0] = fx * x * rz + cx;
+  expected.means2d[1] = fy * y * rz + cy;
+  expected.depth = z;
+  expected.conics[0] = cov11 / det;
+  expected.conics[1] = -cov01 / det;
+  expected.conics[2] = cov00 / det;
+  expected.compensation = compensation;
+  return expected;
 }
 
 void test_dummy_add() {
@@ -127,6 +221,215 @@ void test_projection_ewa_3dgs_fused_shapes() {
   std::cout << "projection_ewa_3dgs_fused CPU shape smoke ok\n";
 }
 
+void expect_projection_values(const std::vector<mx::array>& outputs,
+                              const std::vector<ProjectionExpected>& expected,
+                              const std::string& name) {
+  mx::eval(outputs);
+
+  const int32_t* radii = outputs[gsplat_core::kRadii].data<int32_t>();
+  const float* means2d = outputs[gsplat_core::kMeans2D].data<float>();
+  const float* depths = outputs[gsplat_core::kDepths].data<float>();
+  const float* conics = outputs[gsplat_core::kConics].data<float>();
+  const float* compensations =
+      outputs[gsplat_core::kCompensations].data<float>();
+
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expect(radii[i * 2] == expected[i].radii[0],
+           name + " radii x mismatch at gaussian " + std::to_string(i));
+    expect(radii[i * 2 + 1] == expected[i].radii[1],
+           name + " radii y mismatch at gaussian " + std::to_string(i));
+    expect_close(means2d[i * 2], expected[i].means2d[0], 1.0e-4f,
+                 name + " means2d x");
+    expect_close(means2d[i * 2 + 1], expected[i].means2d[1], 1.0e-4f,
+                 name + " means2d y");
+    expect_close(depths[i], expected[i].depth, 1.0e-5f, name + " depth");
+    expect_close(conics[i * 3], expected[i].conics[0], 1.0e-4f,
+                 name + " conic xx");
+    expect_close(conics[i * 3 + 1], expected[i].conics[1], 1.0e-4f,
+                 name + " conic xy");
+    expect_close(conics[i * 3 + 2], expected[i].conics[2], 1.0e-4f,
+                 name + " conic yy");
+    expect_close(compensations[i], expected[i].compensation, 1.0e-4f,
+                 name + " compensation");
+  }
+}
+
+void test_projection_ewa_3dgs_fused_gpu_numeric() {
+  constexpr int image_width = 64;
+  constexpr int image_height = 64;
+  constexpr float fx = 50.0f;
+  constexpr float fy = 50.0f;
+  constexpr float cx = 32.0f;
+  constexpr float cy = 32.0f;
+  constexpr float eps2d = 0.3f;
+
+  mx::array means(
+      {0.0f, 0.0f, 1.0f, 0.25f, -0.25f, 2.0f},
+      {1, 2, 3},
+      mx::float32);
+  mx::array quats(
+      {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
+      {1, 2, 4},
+      mx::float32);
+  mx::array scales(
+      {0.1f, 0.1f, 0.1f, 0.2f, 0.2f, 0.2f},
+      {1, 2, 3},
+      mx::float32);
+  mx::array opacities({0.8f, 0.6f}, {1, 2}, mx::float32);
+  mx::array viewmats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       0.0f, 1.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 1.0f, 0.0f,
+       0.0f, 0.0f, 0.0f, 1.0f},
+      {1, 1, 4, 4},
+      mx::float32);
+  mx::array Ks(
+      {fx, 0.0f, cx,
+       0.0f, fy, cy,
+       0.0f, 0.0f, 1.0f},
+      {1, 1, 3, 3},
+      mx::float32);
+
+  const std::vector<ProjectionExpected> expected = {
+      reference_pinhole_projection(0.0f, 0.0f, 1.0f, 0.01f, 0.8f,
+                                   image_width, image_height, fx, fy, cx, cy,
+                                   eps2d, true),
+      reference_pinhole_projection(0.25f, -0.25f, 2.0f, 0.04f, 0.6f,
+                                   image_width, image_height, fx, fy, cx, cy,
+                                   eps2d, true),
+  };
+
+  gsplat_core::ProjectionEWA3DGSFusedInput quat_scale_input = {
+      .means = means,
+      .covars = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .quats = quats,
+      .scales = scales,
+      .opacities = opacities,
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .s = mx::Device::gpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .eps2d = eps2d,
+          .near_plane = 0.01f,
+          .far_plane = 100.0f,
+          .radius_clip = 0.0f,
+          .calc_compensations = true,
+          .camera_model = 0,
+          .use_covars = false,
+          .use_opacities = true,
+      },
+  };
+  expect_projection_values(
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(quat_scale_input),
+      expected,
+      "projection quats/scales");
+
+  mx::array covars(
+      {0.01f, 0.0f, 0.0f, 0.01f, 0.0f, 0.01f,
+       0.04f, 0.0f, 0.0f, 0.04f, 0.0f, 0.04f},
+      {1, 2, 6},
+      mx::float32);
+  gsplat_core::ProjectionEWA3DGSFusedInput covars_input = quat_scale_input;
+  covars_input.covars = covars;
+  covars_input.quats = mx::zeros({0}, mx::float32, mx::Device::gpu);
+  covars_input.scales = mx::zeros({0}, mx::float32, mx::Device::gpu);
+  covars_input.params.use_covars = true;
+  expect_projection_values(
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(covars_input),
+      expected,
+      "projection covars");
+
+  std::cout << "projection_ewa_3dgs_fused GPU numeric smoke ok\n";
+}
+
+void test_intersect_tile_and_offset_dense_aabb() {
+  mx::array means2d(
+      {20.0f, 20.0f, 50.0f, 50.0f, 8.0f, 8.0f},
+      {1, 3, 2},
+      mx::float32);
+  mx::array radii(
+      {10, 10, 5, 5, 0, 0},
+      {1, 3, 2},
+      mx::int32);
+  mx::array depths(
+      {1.0f, 0.5f, 2.0f},
+      {1, 3},
+      mx::float32);
+
+  gsplat_core::IntersectTileInput input = {
+      .means2d = means2d,
+      .radii = radii,
+      .depths = depths,
+      .conics = mx::zeros({0}, mx::float32),
+      .opacities = mx::zeros({0}, mx::float32),
+      .image_ids = mx::zeros({0}, mx::int64),
+      .gaussian_ids = mx::zeros({0}, mx::int64),
+      .s = mx::Device::cpu,
+      .params = {
+          .I = 1,
+          .tile_size = 16,
+          .tile_width = 4,
+          .tile_height = 4,
+          .sort = true,
+          .segmented = false,
+          .packed = false,
+          .use_conics = false,
+          .use_opacities = false,
+      },
+  };
+
+  std::vector<mx::array> outputs = gsplat_core::gsplat_intersect_tile(input);
+  expect(outputs.size() == 3, "intersect_tile output count mismatch");
+  expect_shape(outputs[gsplat_core::kTilesPerGauss], {1, 3}, "tiles_per_gauss");
+  expect_shape(outputs[gsplat_core::kIsectIds], {8}, "isect_ids");
+  expect_shape(outputs[gsplat_core::kFlattenIds], {8}, "flatten_ids");
+  expect_dtype(outputs[gsplat_core::kTilesPerGauss], mx::int32, "tiles_per_gauss");
+  expect_dtype(outputs[gsplat_core::kIsectIds], mx::int64, "isect_ids");
+  expect_dtype(outputs[gsplat_core::kFlattenIds], mx::int32, "flatten_ids");
+
+  mx::eval(outputs);
+  const int32_t* tiles_per_gauss =
+      outputs[gsplat_core::kTilesPerGauss].data<int32_t>();
+  const int64_t* isect_ids = outputs[gsplat_core::kIsectIds].data<int64_t>();
+  const int32_t* flatten_ids =
+      outputs[gsplat_core::kFlattenIds].data<int32_t>();
+
+  expect(tiles_per_gauss[0] == 4, "tiles_per_gauss[0] mismatch");
+  expect(tiles_per_gauss[1] == 4, "tiles_per_gauss[1] mismatch");
+  expect(tiles_per_gauss[2] == 0, "tiles_per_gauss[2] mismatch");
+
+  const int expected_tiles[8] = {0, 1, 4, 5, 10, 11, 14, 15};
+  const int expected_flatten[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+  for (int i = 0; i < 8; ++i) {
+    expect(static_cast<int>((isect_ids[i] >> 32) & 0x1f) == expected_tiles[i],
+           "intersect tile id mismatch at " + std::to_string(i));
+    expect(flatten_ids[i] == expected_flatten[i],
+           "intersect flatten id mismatch at " + std::to_string(i));
+  }
+
+  mx::array offsets = gsplat_core::gsplat_intersect_offset(
+      outputs[gsplat_core::kIsectIds], 1, 4, 4, mx::Device::cpu);
+  expect_shape(offsets, {1, 4, 4}, "intersect offsets");
+  expect_dtype(offsets, mx::int32, "intersect offsets");
+  offsets.eval();
+
+  const int expected_offsets[16] = {
+      0, 1, 2, 2,
+      2, 3, 4, 4,
+      4, 4, 4, 5,
+      6, 6, 6, 7,
+  };
+  const int32_t* offset_data = offsets.data<int32_t>();
+  for (int i = 0; i < 16; ++i) {
+    expect(offset_data[i] == expected_offsets[i],
+           "intersect offset mismatch at " + std::to_string(i));
+  }
+
+  std::cout << "intersect_tile/intersect_offset dense AABB smoke ok\n";
+}
+
 }  // namespace
 
 int main() {
@@ -135,6 +438,8 @@ int main() {
     test_dummy_add();
     test_dummy_array_add();
     test_projection_ewa_3dgs_fused_shapes();
+    test_projection_ewa_3dgs_fused_gpu_numeric();
+    test_intersect_tile_and_offset_dense_aabb();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;
   } catch (const std::exception& e) {
