@@ -31,3 +31,17 @@ ref__*
 
 The Mac/MLX side should load the same `input__*` arrays, run `gsplat_core`,
 and compare against `ref__*`.
+
+After copying the exported fixtures into `refs/`, compare them on the Mac/MLX
+side with:
+
+```bash
+conda run -n fastgs_core python scripts/test/compare_exported_npz.py
+```
+
+Pass one or more paths to compare a subset:
+
+```bash
+conda run -n fastgs_core python scripts/test/compare_exported_npz.py \
+  refs/forward_3dgs_chain.npz
+```

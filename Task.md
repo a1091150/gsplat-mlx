@@ -258,7 +258,7 @@
 - [x] Add `.npz` export script for quat/scale covariance/precision.
 - [x] Add `.npz` export script for the end-to-end 3DGS forward chain.
 - [x] Document export usage in `scripts/export_ref/README.md`.
-- [ ] Add Mac/MLX compare scripts that consume exported `.npz` files.
+- [x] Add Mac/MLX compare scripts that consume exported `.npz` files.
 
 ## Task 3.9 - Spherical Harmonics MLX Primitive + Metal Kernel
 - [x] Add `GSPlatSphericalHarmonics` Primitive.
@@ -335,6 +335,7 @@
 - [x] `scripts/export_ref/export_spherical_harmonics_forward.py`
 - [x] `scripts/export_ref/export_quat_scale_to_covar_preci_forward.py`
 - [x] `scripts/export_ref/export_forward_3dgs_chain.py`
+- [x] `scripts/test/compare_exported_npz.py`
 
 ## Acceptance Criteria
 - [ ] `make env-check` passes.
