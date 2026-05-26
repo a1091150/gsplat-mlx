@@ -626,7 +626,7 @@
   path.
 
 ## Proposed Implementation Order
-- [ ] Task 6.1: Backward CUDA source map and saved-tensor contract.
+- [x] Task 6.1: Backward CUDA source map and saved-tensor contract.
 - [ ] Task 6.2: Backward API design doc and `.npz` fixture schema.
 - [ ] Task 6.3: Spherical harmonics explicit backward.
 - [ ] Task 6.4: Quat/scale covariance/precision explicit backward.
@@ -656,3 +656,12 @@
   quat/scale op before rasterize/projection.
 - How much of the high-level training wrapper should be delayed until dense
   low-level backward parity is stable.
+
+## Task 6.1 - Backward CUDA Source Map And Saved-Tensor Contract
+- [x] Add `note/gsplat_backward_source_map.md`.
+- [x] Map dense 3DGS backward custom op schemas from `ext.cpp`.
+- [x] Map `_wrapper.py` saved tensors and backward cotangents.
+- [x] Document explicit MLX backward API candidates.
+- [x] Document non-differentiable inputs and scalar params.
+- [x] Mark packed, 2DGS, UT/world-ray, and lidar backward as out of scope.
+- [x] Recommend `spherical_harmonics_backward` as the first implementation slice.
