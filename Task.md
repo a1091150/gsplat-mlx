@@ -1,0 +1,182 @@
+# gsplat 3DGS MLX Migration Tasks
+
+## Project Scope
+- Source project: `submodules/gsplat`.
+- Source CUDA code: `submodules/gsplat/gsplat/cuda`.
+- Target package: `gsplat_core`.
+- Target direction: gsplat CUDA/PyTorch extension to MLX Metal extension.
+- Primary milestone: 3DGS forward low-level ops.
+- Conda environment: `fastgs_core`.
+
+## Explicitly Out of Scope
+- 2DGS operators and rendering paths.
+- Backward/autograd kernels.
+- UT / rolling-shutter / world-ray rasterization paths.
+- Lidar operators.
+- Adam, relocation, MCMC perturb, camera wrappers, and external distortion.
+- Python test automation targets in Makefile. Python tests remain manual scripts.
+
+## Directory and Naming Rules
+- C++ headers: `gsplat_core/include/gsplat_<op>.h`.
+- C++ implementation: `gsplat_core/gsplat_<op>.cpp`.
+- Metal kernels: `gsplat_core/metal/gsplat_<op>.metal`.
+- Binding entry: `gsplat_core/binding/binding.cpp`.
+- Python package: `python_package/gsplat_core`.
+- Manual Python scripts: `scripts/test`.
+- C++ namespace: `gsplat_core`.
+- Python extension module: `_gsplat_core`.
+- Do not introduce `fastgs` names for new gsplat migration files, symbols, or APIs.
+
+## Build and Install Entry Points
+- `make env-check`: validate conda Python, CMake, MLX, nanobind, and MLX CMake package path.
+- `make xcode-build`: configure and build `_gsplat_core` with Xcode using the Python `mlx` package CMake config.
+- `make pip-install`: install package with `pip install . --no-build-isolation`.
+- `make pip-develop`: editable install with `pip install -e . --no-build-isolation`.
+- `make clean`: remove local build and Python packaging artifacts.
+
+---
+
+# Task 1 - Project/Build Skeleton
+
+## Scope
+- Establish the minimal gsplat_core build skeleton before CUDA op migration.
+- Keep the root build entry style aligned with the FastGS MLX migration project.
+- Use only the Python `mlx` package for MLX CMake configuration.
+
+## Completed
+- [x] Add root `CMakeLists.txt`.
+- [x] Add root `Makefile`.
+- [x] Add `setup.py` and `pyproject.toml`.
+- [x] Add C++ source layout:
+  - [x] `gsplat_core/include/`
+  - [x] `gsplat_core/metal/`
+  - [x] `gsplat_core/binding/`
+  - [x] `gsplat_core/test/`
+- [x] Add dummy C++ source/header/test.
+- [x] Add nanobind module `_gsplat_core`.
+- [x] Add Python package directory `python_package/gsplat_core`.
+- [x] Add manual dummy script under `scripts/test`.
+- [x] Remove FastGS naming from project, target, module, and package identifiers.
+
+## Validation Completed
+- [x] `make env-check`.
+- [x] `make xcode-build`.
+- [x] C++ dummy target builds.
+- [x] `_gsplat_core` builds through Xcode.
+
+## Notes
+- The current implementation is intentionally dummy-only.
+- Python MLX runtime checks are left to manual local testing.
+
+---
+
+# Task 2 - CUDA Source Map
+
+## Scope
+- Identify the gsplat CUDA 3DGS forward operators to migrate.
+- Record the source files and exported torch ops before implementing any op.
+
+## Source Files
+- `submodules/gsplat/gsplat/cuda/ext.cpp`
+- `submodules/gsplat/gsplat/cuda/_wrapper.py`
+- `submodules/gsplat/gsplat/cuda/_torch_impl.py`
+- `submodules/gsplat/gsplat/cuda/csrc/QuatScaleToCovar.cpp`
+- `submodules/gsplat/gsplat/cuda/csrc/QuatScaleToCovarCUDA.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonics.cpp`
+- `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonicsCUDA.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/Projection.cpp`
+- `submodules/gsplat/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/ProjectionEWA3DGSPacked.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/Intersect.cpp`
+- `submodules/gsplat/gsplat/cuda/csrc/IntersectTile.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/Rasterization.cpp`
+- `submodules/gsplat/gsplat/cuda/csrc/RasterizeToPixels3DGSFwd.cu`
+- `submodules/gsplat/gsplat/cuda/csrc/RasterizeToIndices3DGS.cu`
+
+## 3DGS Forward Ops
+- [ ] `quat_scale_to_covar_preci_fwd`
+- [ ] `spherical_harmonics_fwd`
+- [ ] `projection_ewa_3dgs_fused_fwd`
+- [ ] `projection_ewa_3dgs_packed_fwd`
+- [ ] `intersect_tile`
+- [ ] `intersect_offset`
+- [ ] `rasterize_to_pixels_3dgs_fwd`
+- [ ] `rasterize_to_indices_3dgs`
+
+## Excluded CUDA Ops
+- [ ] `projection_2dgs_fused_fwd`
+- [ ] `projection_2dgs_packed_fwd`
+- [ ] `rasterize_to_pixels_2dgs_fwd`
+- [ ] `rasterize_to_indices_2dgs`
+- [ ] `projection_ut_3dgs_fused`
+- [ ] `rasterize_to_pixels_from_world_3dgs_fwd`
+- [ ] `intersect_tile_lidar`
+
+---
+
+# Task 3 - Forward Low-Level Ops
+
+## Scope
+- Migrate 3DGS forward low-level ops one at a time.
+- Use MLX Primitive C++ wrappers and Metal kernels, following the FastGS MLX migration style.
+- Keep APIs close to gsplat CUDA op semantics while using MLX arrays.
+
+## Planned Subtasks
+- [ ] Task 3.1: Projection 3DGS forward.
+- [ ] Task 3.2: Intersect tile / intersect offset forward.
+- [ ] Task 3.3: Rasterize to pixels 3DGS forward.
+- [ ] Task 3.4: Spherical harmonics forward.
+- [ ] Task 3.5: Quat/scale to covariance/precision forward.
+
+## Implementation Rules
+- Each op gets a header, C++ implementation, and Metal kernel file.
+- Each op exposes one migration-friendly C++ function in namespace `gsplat_core`.
+- Binding functions should use clear low-level names based on gsplat CUDA op names.
+- CPU fallback may throw or return zero-filled placeholders until a CPU path is explicitly needed.
+- GPU path is the source of truth for migrated behavior.
+
+---
+
+# Task 4 - Binding and Python-Facing API
+
+## Scope
+- Expose migrated low-level ops through `gsplat_core`.
+- Keep Python API names close to gsplat CUDA op names, with `_forward` suffixes where useful for clarity.
+
+## Planned APIs
+- [ ] `quat_scale_to_covar_preci_forward(...)`
+- [ ] `spherical_harmonics_forward(...)`
+- [ ] `projection_ewa_3dgs_fused_forward(...)`
+- [ ] `projection_ewa_3dgs_packed_forward(...)`
+- [ ] `intersect_tile_forward(...)`
+- [ ] `intersect_offset_forward(...)`
+- [ ] `rasterize_to_pixels_3dgs_forward(...)`
+- [ ] `rasterize_to_indices_3dgs_forward(...)`
+
+## Notes
+- High-level `gsplat.rendering.rasterization` compatibility is not part of the first milestone.
+- End-to-end rendering can be added after the low-level op chain is stable.
+
+---
+
+# Task 5 - Parity and Smoke Validation
+
+## Scope
+- Add manual Python scripts under `scripts/test`.
+- Validate shape and dtype parity before numeric parity.
+- Compare against gsplat CUDA/PyTorch references when the local environment supports it.
+
+## Planned Scripts
+- [ ] `scripts/test/projection_ewa_3dgs_fused_forward.py`
+- [ ] `scripts/test/intersect_tile_forward.py`
+- [ ] `scripts/test/rasterize_to_pixels_3dgs_forward.py`
+- [ ] `scripts/test/spherical_harmonics_forward.py`
+- [ ] `scripts/test/quat_scale_to_covar_preci_forward.py`
+
+## Acceptance Criteria
+- [ ] `make env-check` passes.
+- [ ] `make xcode-build` passes.
+- [ ] `make pip-develop` succeeds in the conda environment.
+- [ ] Each migrated op imports from `gsplat_core`.
+- [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
+- [ ] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
