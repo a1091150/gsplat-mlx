@@ -146,6 +146,7 @@
 - [x] Task 3.8: CUDA reference `.npz` export scripts.
 - [x] Task 3.9: Spherical harmonics MLX Primitive + Metal kernel.
 - [x] Task 3.10: Quat/scale covariance/precision MLX Primitive + Metal kernel.
+- [x] Task 3.11A: Intersect tile count MLX Primitive + Metal kernel.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -178,6 +179,9 @@
 - [x] Support dense AABB fallback path for `[I, N, ...]` style inputs.
 - [x] Support optional sort for dense AABB fallback path.
 - [x] Add C++ smoke coverage for tile counts, encoded tile ids, flatten ids, and offsets.
+- [x] Add `GSPlatIntersectTileCount` MLX Primitive.
+- [x] Add Metal kernel `gsplat_intersect_tile_count_kernel`.
+- [x] Validate dense AABB tile count on GPU.
 - [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
@@ -286,6 +290,18 @@
 - [ ] Run Python manual script after local package reinstall.
 - [ ] Compare against exported CUDA `.npz` reference.
 
+## Task 3.11A - Intersect Tile Count MLX Primitive + Metal Kernel
+- [x] Add `gsplat_intersect_tile_count(...)` C++ entry point.
+- [x] Add `GSPlatIntersectTileCount` Primitive.
+- [x] Add Metal kernel `gsplat_intersect_tile_count_kernel`.
+- [x] Support dense AABB count path for `means2d [..., N, 2]`, `radii [..., N, 2]`, and `depths [..., N]`.
+- [x] Keep full `intersect_tile_forward` on the C++ reference path for `isect_ids` and `flatten_ids`.
+- [x] Add C++/Metal smoke coverage for dense AABB tile counts.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [ ] Use tile count primitive inside a future full GPU intersect path.
+- [ ] Add encode/prefix/sort GPU path.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -346,4 +362,5 @@
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
 - [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
+- [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

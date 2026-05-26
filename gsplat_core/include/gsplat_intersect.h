@@ -4,6 +4,8 @@
 #include <vector>
 
 #include <mlx/mlx.h>
+#include <mlx/ops.h>
+#include <mlx/primitives.h>
 
 namespace gsplat_core {
 
@@ -40,11 +42,48 @@ enum IntersectTileOutputIndex {
 std::vector<mlx::core::array> gsplat_intersect_tile(
     const IntersectTileInput& input);
 
+mlx::core::array gsplat_intersect_tile_count(const IntersectTileInput& input);
+
 mlx::core::array gsplat_intersect_offset(
     const mlx::core::array& isect_ids,
     int I,
     int tile_width,
     int tile_height,
     mlx::core::StreamOrDevice s = mlx::core::Device::cpu);
+
+class GSPlatIntersectTileCount : public mlx::core::Primitive {
+ public:
+  GSPlatIntersectTileCount(mlx::core::Stream stream, IntersectTileParams params)
+      : mlx::core::Primitive(stream), params_(params) {}
+
+  void eval_cpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+  void eval_gpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+
+  std::vector<mlx::core::array> jvp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& tangents,
+      const std::vector<int>& argnums) override;
+
+  std::vector<mlx::core::array> vjp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& cotangents,
+      const std::vector<int>& argnums,
+      const std::vector<mlx::core::array>& outputs) override;
+
+  std::pair<std::vector<mlx::core::array>, std::vector<int>> vmap(
+      const std::vector<mlx::core::array>& inputs,
+      const std::vector<int>& axes) override;
+
+  const char* name() const override {
+    return "GSPlatIntersectTileCount";
+  }
+
+  bool is_equivalent(const mlx::core::Primitive& other) const override;
+
+ private:
+  IntersectTileParams params_;
+};
 
 }  // namespace gsplat_core

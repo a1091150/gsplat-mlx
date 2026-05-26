@@ -1,5 +1,7 @@
 #include "include/gsplat_intersect.h"
 
+#include "include/helper.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -10,11 +12,26 @@
 
 #include "mlx/mlx.h"
 #include "mlx/ops.h"
+#include "mlx/backend/common/utils.h"
+#include "mlx/backend/cpu/encoder.h"
+#include "mlx/utils.h"
+
+#ifdef _METAL_
+#include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/utils.h"
+#endif
 
 namespace mx = mlx::core;
 
 namespace gsplat_core {
 namespace {
+
+struct IntersectTileCountKernelParams {
+  uint32_t numel;
+  uint32_t tile_size;
+  uint32_t tile_width;
+  uint32_t tile_height;
+};
 
 struct TileRect {
   int min_x;
@@ -101,6 +118,12 @@ void validate_intersect_tile_input(const IntersectTileInput& input) {
   if (input.depths.ndim() + 1 != input.means2d.ndim()) {
     throw std::runtime_error("depths must have shape [..., N].");
   }
+  if (input.means2d.dtype().val() != mx::float32.val() ||
+      input.radii.dtype().val() != mx::int32.val() ||
+      input.depths.dtype().val() != mx::float32.val()) {
+    throw std::runtime_error(
+        "intersect_tile dense path expects float32 means2d/depths and int32 radii.");
+  }
 }
 
 mx::Shape scalar_shape_from_depths(const mx::array& depths) {
@@ -113,6 +136,28 @@ mx::Shape scalar_shape_from_depths(const mx::array& depths) {
 }
 
 }  // namespace
+
+mx::array gsplat_intersect_tile_count(const IntersectTileInput& input) {
+  validate_intersect_tile_input(input);
+
+  const int ndim = static_cast<int>(input.means2d.ndim());
+  const int n = input.means2d.shape(ndim - 2);
+  const int numel = static_cast<int>(input.depths.size());
+  const int I = input.params.I;
+  if (I <= 0 || numel % I != 0 || numel != I * n) {
+    throw std::runtime_error(
+        "intersect_tile_count dense path expects depths size to equal I * N.");
+  }
+
+  auto prim = std::make_shared<GSPlatIntersectTileCount>(
+      to_stream(input.s), input.params);
+  std::vector<mx::array> inputs = {
+      mx::contiguous(input.means2d),
+      mx::contiguous(input.radii),
+      mx::contiguous(input.depths),
+  };
+  return mx::array(scalar_shape_from_depths(input.depths), mx::int32, prim, inputs);
+}
 
 std::vector<mx::array> gsplat_intersect_tile(const IntersectTileInput& input) {
   validate_intersect_tile_input(input);
@@ -202,6 +247,130 @@ std::vector<mx::array> gsplat_intersect_tile(const IntersectTileInput& input) {
       mx::Shape{static_cast<int>(flatten_ids.size())},
       mx::int32));
   return outputs;
+}
+
+void GSPlatIntersectTileCount::eval_cpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  const auto& means2d = inputs[0];
+  const auto& radii = inputs[1];
+  const auto& depths = inputs[2];
+  mx::eval(means2d, radii, depths);
+
+  auto& tiles_per_gauss = outputs[0];
+  tiles_per_gauss.set_data(mx::allocator::malloc(tiles_per_gauss.nbytes()));
+  std::memset(tiles_per_gauss.data<void>(), 0, tiles_per_gauss.nbytes());
+
+  const int numel = static_cast<int>(depths.size());
+  const float* means_data = means2d.data<float>();
+  const int32_t* radii_data = radii.data<int32_t>();
+  int32_t* out_data = tiles_per_gauss.data<int32_t>();
+
+  for (int idx = 0; idx < numel; ++idx) {
+    const TileRect rect = aabb_tile_rect(
+        means_data[idx * 2],
+        means_data[idx * 2 + 1],
+        radii_data[idx * 2],
+        radii_data[idx * 2 + 1],
+        params_.tile_size,
+        params_.tile_width,
+        params_.tile_height);
+    out_data[idx] =
+        static_cast<int32_t>((rect.max_y - rect.min_y) *
+                             (rect.max_x - rect.min_x));
+  }
+}
+
+#ifdef _METAL_
+void GSPlatIntersectTileCount::eval_gpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  const auto& means2d = inputs[0];
+  const auto& radii = inputs[1];
+  const auto& depths = inputs[2];
+
+  auto& tiles_per_gauss = outputs[0];
+  tiles_per_gauss.set_data(mx::allocator::malloc(tiles_per_gauss.nbytes()));
+  std::memset(tiles_per_gauss.data<void>(), 0, tiles_per_gauss.nbytes());
+
+  const uint32_t numel = static_cast<uint32_t>(depths.size());
+  if (numel == 0) {
+    return;
+  }
+
+  IntersectTileCountKernelParams kernel_params = {
+      .numel = numel,
+      .tile_size = static_cast<uint32_t>(params_.tile_size),
+      .tile_width = static_cast<uint32_t>(params_.tile_width),
+      .tile_height = static_cast<uint32_t>(params_.tile_height),
+  };
+
+  auto& s = stream();
+  auto& d = mx::metal::device(s.device);
+  auto lib = d.get_library("gsplat_core", current_binary_dir());
+  auto kernel = d.get_kernel("gsplat_intersect_tile_count_kernel", lib);
+
+  auto& compute_encoder = d.get_command_encoder(s.index);
+  compute_encoder.set_compute_pipeline_state(kernel);
+  compute_encoder.set_bytes(kernel_params, 0);
+  compute_encoder.set_input_array(means2d, 1);
+  compute_encoder.set_input_array(radii, 2);
+  compute_encoder.set_output_array(tiles_per_gauss, 3);
+
+  const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
+  const size_t tgp_size = std::min(static_cast<size_t>(numel), max_threads);
+  MTL::Size group_size = MTL::Size(tgp_size, 1, 1);
+  MTL::Size grid_size = MTL::Size(numel, 1, 1);
+  compute_encoder.dispatch_threads(grid_size, group_size);
+}
+#else
+void GSPlatIntersectTileCount::eval_gpu(
+    const std::vector<mx::array>&,
+    std::vector<mx::array>&) {
+  throw std::runtime_error(
+      "GSPlatIntersectTileCount has no GPU implementation.");
+}
+#endif
+
+std::vector<mx::array> GSPlatIntersectTileCount::jvp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&) {
+  throw std::runtime_error("GSPlatIntersectTileCount jvp is not implemented.");
+}
+
+std::vector<mx::array> GSPlatIntersectTileCount::vjp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&,
+    const std::vector<mx::array>&) {
+  throw std::runtime_error("GSPlatIntersectTileCount vjp is not implemented.");
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+GSPlatIntersectTileCount::vmap(const std::vector<mx::array>&,
+                               const std::vector<int>&) {
+  throw std::runtime_error("GSPlatIntersectTileCount vmap is not implemented.");
+}
+
+bool GSPlatIntersectTileCount::is_equivalent(
+    const mx::Primitive& other) const {
+  if (name() != other.name()) {
+    return false;
+  }
+  const auto* other_ptr = dynamic_cast<const GSPlatIntersectTileCount*>(&other);
+  if (!other_ptr) {
+    return false;
+  }
+  return params_.I == other_ptr->params_.I &&
+         params_.tile_size == other_ptr->params_.tile_size &&
+         params_.tile_width == other_ptr->params_.tile_width &&
+         params_.tile_height == other_ptr->params_.tile_height &&
+         params_.sort == other_ptr->params_.sort &&
+         params_.segmented == other_ptr->params_.segmented &&
+         params_.packed == other_ptr->params_.packed &&
+         params_.use_conics == other_ptr->params_.use_conics &&
+         params_.use_opacities == other_ptr->params_.use_opacities;
 }
 
 mx::array gsplat_intersect_offset(const mx::array& isect_ids,

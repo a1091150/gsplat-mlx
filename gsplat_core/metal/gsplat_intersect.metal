@@ -2,6 +2,44 @@
 
 using namespace metal;
 
-// Placeholder for the full Metal implementation of gsplat intersect kernels.
-// The current migration slice keeps a C++ reference path so the API and C++
-// smoke tests can be validated before moving tile binning onto GPU.
+struct IntersectTileCountKernelParams {
+  uint numel;
+  uint tile_size;
+  uint tile_width;
+  uint tile_height;
+};
+
+inline int clamp_tile(int value, uint upper) {
+  return min(max(0, value), int(upper));
+}
+
+kernel void gsplat_intersect_tile_count_kernel(
+    constant IntersectTileCountKernelParams& params [[buffer(0)]],
+    const device float* means2d [[buffer(1)]],
+    const device int* radii [[buffer(2)]],
+    device int* tiles_per_gauss [[buffer(3)]],
+    uint idx [[thread_position_in_grid]]) {
+  if (idx >= params.numel) {
+    return;
+  }
+
+  int radius_x = radii[idx * 2];
+  int radius_y = radii[idx * 2 + 1];
+  if (radius_x <= 0 || radius_y <= 0) {
+    tiles_per_gauss[idx] = 0;
+    return;
+  }
+
+  float tile_size = float(params.tile_size);
+  float tile_radius_x = float(radius_x) / tile_size;
+  float tile_radius_y = float(radius_y) / tile_size;
+  float tile_x = means2d[idx * 2] / tile_size;
+  float tile_y = means2d[idx * 2 + 1] / tile_size;
+
+  int min_x = clamp_tile(int(floor(tile_x - tile_radius_x)), params.tile_width);
+  int min_y = clamp_tile(int(floor(tile_y - tile_radius_y)), params.tile_height);
+  int max_x = clamp_tile(int(ceil(tile_x + tile_radius_x)), params.tile_width);
+  int max_y = clamp_tile(int(ceil(tile_y + tile_radius_y)), params.tile_height);
+
+  tiles_per_gauss[idx] = (max_y - min_y) * (max_x - min_x);
+}

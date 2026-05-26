@@ -433,6 +433,55 @@ void test_intersect_tile_and_offset_dense_aabb() {
   std::cout << "intersect_tile/intersect_offset dense AABB smoke ok\n";
 }
 
+void test_intersect_tile_count_gpu_dense_aabb() {
+  mx::array means2d(
+      {20.0f, 20.0f, 50.0f, 50.0f, 8.0f, 8.0f},
+      {1, 3, 2},
+      mx::float32);
+  mx::array radii(
+      {10, 10, 5, 5, 0, 0},
+      {1, 3, 2},
+      mx::int32);
+  mx::array depths(
+      {1.0f, 0.5f, 2.0f},
+      {1, 3},
+      mx::float32);
+
+  gsplat_core::IntersectTileInput input = {
+      .means2d = means2d,
+      .radii = radii,
+      .depths = depths,
+      .conics = mx::zeros({0}, mx::float32),
+      .opacities = mx::zeros({0}, mx::float32),
+      .image_ids = mx::zeros({0}, mx::int64),
+      .gaussian_ids = mx::zeros({0}, mx::int64),
+      .s = mx::Device::gpu,
+      .params = {
+          .I = 1,
+          .tile_size = 16,
+          .tile_width = 4,
+          .tile_height = 4,
+          .sort = true,
+          .segmented = false,
+          .packed = false,
+          .use_conics = false,
+          .use_opacities = false,
+      },
+  };
+
+  mx::array counts = gsplat_core::gsplat_intersect_tile_count(input);
+  expect_shape(counts, {1, 3}, "intersect tile count gpu");
+  expect_dtype(counts, mx::int32, "intersect tile count gpu");
+  counts.eval();
+
+  const int32_t* data = counts.data<int32_t>();
+  expect(data[0] == 4, "intersect tile count gpu[0] mismatch");
+  expect(data[1] == 4, "intersect tile count gpu[1] mismatch");
+  expect(data[2] == 0, "intersect tile count gpu[2] mismatch");
+
+  std::cout << "intersect_tile_count GPU dense AABB smoke ok\n";
+}
+
 void test_rasterize_to_pixels_3dgs_dense_reference() {
   mx::array means2d({1.0f, 1.0f}, {1, 1, 2}, mx::float32);
   mx::array conics({1.0f, 0.0f, 1.0f}, {1, 1, 3}, mx::float32);
@@ -936,6 +985,7 @@ int main() {
     test_projection_ewa_3dgs_fused_shapes();
     test_projection_ewa_3dgs_fused_gpu_numeric();
     test_intersect_tile_and_offset_dense_aabb();
+    test_intersect_tile_count_gpu_dense_aabb();
     test_rasterize_to_pixels_3dgs_dense_reference();
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
