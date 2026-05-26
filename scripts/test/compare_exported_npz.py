@@ -37,15 +37,21 @@ def ref(data: np.lib.npyio.NpzFile, name: str) -> np.ndarray:
 
 
 def compare_projection(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "means": mx_array(data, "input__means"),
+        "viewmats": mx_array(data, "input__viewmats"),
+        "Ks": mx_array(data, "input__Ks"),
+    }
+    if "input__covars" in data.files:
+        inputs["covars"] = mx_array(data, "input__covars")
+    else:
+        inputs["quats"] = mx_array(data, "input__quats")
+        inputs["scales"] = mx_array(data, "input__scales")
+    if "input__opacities" in data.files:
+        inputs["opacities"] = mx_array(data, "input__opacities")
+
     actual = projection_ewa_3dgs_fused_forward(
-        {
-            "means": mx_array(data, "input__means"),
-            "quats": mx_array(data, "input__quats"),
-            "scales": mx_array(data, "input__scales"),
-            "opacities": mx_array(data, "input__opacities"),
-            "viewmats": mx_array(data, "input__viewmats"),
-            "Ks": mx_array(data, "input__Ks"),
-        },
+        inputs,
         image_width=int(scalar(data, "input__image_width")),
         image_height=int(scalar(data, "input__image_height")),
         eps2d=float(scalar(data, "input__eps2d")),
@@ -56,13 +62,18 @@ def compare_projection(data: np.lib.npyio.NpzFile) -> list[bool]:
         camera_model=int(scalar(data, "input__camera_model")),
     )
     mx.eval(*actual.values())
-    return [
+    results = [
         compare_array("radii", ref(data, "radii"), mx_to_numpy(actual["radii"])),
-        compare_array("means2d", ref(data, "means2d"), mx_to_numpy(actual["means2d"]), atol=1.0e-4, rtol=1.0e-4),
-        compare_array("depths", ref(data, "depths"), mx_to_numpy(actual["depths"]), atol=1.0e-4, rtol=1.0e-4),
-        compare_array("conics", ref(data, "conics"), mx_to_numpy(actual["conics"]), atol=1.0e-4, rtol=1.0e-4),
-        compare_array("compensations", ref(data, "compensations"), mx_to_numpy(actual["compensations"]), atol=1.0e-4, rtol=1.0e-4),
     ]
+    if "ref__means2d" in data.files:
+        results.append(compare_array("means2d", ref(data, "means2d"), mx_to_numpy(actual["means2d"]), atol=1.0e-4, rtol=1.0e-4))
+    if "ref__depths" in data.files:
+        results.append(compare_array("depths", ref(data, "depths"), mx_to_numpy(actual["depths"]), atol=1.0e-4, rtol=1.0e-4))
+    if "ref__conics" in data.files:
+        results.append(compare_array("conics", ref(data, "conics"), mx_to_numpy(actual["conics"]), atol=1.0e-4, rtol=1.0e-4))
+    if "ref__compensations" in data.files:
+        results.append(compare_array("compensations", ref(data, "compensations"), mx_to_numpy(actual["compensations"]), atol=1.0e-4, rtol=1.0e-4))
+    return results
 
 
 def compare_intersect(data: np.lib.npyio.NpzFile) -> list[bool]:
@@ -227,6 +238,10 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "spherical_harmonics_forward.npz": compare_spherical_harmonics,
 }
 
+EXTRA_COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
+    "projection_ewa_3dgs_fused_edge_cases.npz": compare_projection,
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -245,7 +260,7 @@ def main() -> None:
     all_results: list[bool] = []
     for path in paths:
         path = path if path.is_absolute() else ROOT / path
-        comparer = COMPARERS.get(path.name)
+        comparer = COMPARERS.get(path.name) or EXTRA_COMPARERS.get(path.name)
         if comparer is None:
             print(f"{path}: SKIP no comparer")
             continue

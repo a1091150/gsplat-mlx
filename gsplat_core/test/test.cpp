@@ -347,6 +347,92 @@ void test_projection_ewa_3dgs_fused_gpu_numeric() {
   std::cout << "projection_ewa_3dgs_fused GPU numeric smoke ok\n";
 }
 
+void test_projection_ewa_3dgs_fused_gpu_culling_and_empty_compensation() {
+  constexpr int image_width = 64;
+  constexpr int image_height = 64;
+  constexpr float fx = 50.0f;
+  constexpr float fy = 50.0f;
+  constexpr float cx = 32.0f;
+  constexpr float cy = 32.0f;
+  constexpr float eps2d = 0.3f;
+
+  mx::array means(
+      {0.0f, 0.0f, 1.0f,
+       0.0f, 0.0f, 0.001f,
+       0.0f, 0.0f, 200.0f,
+       0.25f, -0.25f, 2.0f},
+      {1, 4, 3},
+      mx::float32);
+  mx::array quats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       1.0f, 0.0f, 0.0f, 0.0f,
+       1.0f, 0.0f, 0.0f, 0.0f,
+       1.0f, 0.0f, 0.0f, 0.0f},
+      {1, 4, 4},
+      mx::float32);
+  mx::array scales(
+      {0.1f, 0.1f, 0.1f,
+       0.1f, 0.1f, 0.1f,
+       0.1f, 0.1f, 0.1f,
+       0.001f, 0.001f, 0.001f},
+      {1, 4, 3},
+      mx::float32);
+  mx::array viewmats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       0.0f, 1.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 1.0f, 0.0f,
+       0.0f, 0.0f, 0.0f, 1.0f},
+      {1, 1, 4, 4},
+      mx::float32);
+  mx::array Ks(
+      {fx, 0.0f, cx,
+       0.0f, fy, cy,
+       0.0f, 0.0f, 1.0f},
+      {1, 1, 3, 3},
+      mx::float32);
+
+  gsplat_core::ProjectionEWA3DGSFusedInput input = {
+      .means = means,
+      .covars = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .quats = quats,
+      .scales = scales,
+      .opacities = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .s = mx::Device::gpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .eps2d = eps2d,
+          .near_plane = 0.01f,
+          .far_plane = 100.0f,
+          .radius_clip = 2.0f,
+          .calc_compensations = false,
+          .camera_model = 0,
+          .use_covars = false,
+          .use_opacities = false,
+      },
+  };
+
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(input);
+  expect_shape(outputs[gsplat_core::kRadii], {1, 1, 4, 2},
+               "projection culling radii");
+  expect_shape(outputs[gsplat_core::kCompensations], {0},
+               "projection empty compensations");
+  mx::eval(outputs);
+
+  const int32_t* radii = outputs[gsplat_core::kRadii].data<int32_t>();
+  expect(radii[0] > 2 && radii[1] > 2,
+         "projection valid gaussian should survive radius_clip");
+  for (int i = 1; i < 4; ++i) {
+    expect(radii[i * 2] == 0 && radii[i * 2 + 1] == 0,
+           "projection culled gaussian should have zero radius");
+  }
+
+  std::cout << "projection_ewa_3dgs_fused GPU culling smoke ok\n";
+}
+
 void test_intersect_tile_and_offset_dense_aabb() {
   mx::array means2d(
       {20.0f, 20.0f, 50.0f, 50.0f, 8.0f, 8.0f},
@@ -1326,6 +1412,7 @@ int main() {
     test_dummy_array_add();
     test_projection_ewa_3dgs_fused_shapes();
     test_projection_ewa_3dgs_fused_gpu_numeric();
+    test_projection_ewa_3dgs_fused_gpu_culling_and_empty_compensation();
     test_intersect_tile_and_offset_dense_aabb();
     test_intersect_tile_count_gpu_dense_aabb();
     test_intersect_tile_encode_gpu_dense_aabb();

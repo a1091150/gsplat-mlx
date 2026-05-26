@@ -15,6 +15,7 @@ Available scripts:
 
 ```text
 export_projection_ewa_3dgs_fused_forward.py
+export_projection_ewa_3dgs_fused_edge_cases.py
 export_intersect_tile_forward.py
 export_rasterize_to_pixels_3dgs_forward.py
 export_spherical_harmonics_forward.py

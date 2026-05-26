@@ -152,6 +152,7 @@
 - [x] Task 3.11D: Intersect tile GPU prefix/sort/reorder helper path.
 - [x] Task 3.11E: Replace dense intersect tile forward with staged GPU path.
 - [x] Task 3.12: Rasterize to pixels 3DGS MLX Primitive + Metal kernel.
+- [x] Task 3.13: Projection 3DGS fused forward parity cleanup.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -172,7 +173,10 @@
 - [x] Add C++ smoke coverage through `make codex-xcode-test`.
 - [x] Add fixed C++/Metal numeric smoke for pinhole quats/scales path.
 - [x] Add fixed C++/Metal numeric smoke for pinhole covars path.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] Add fixed C++/Metal smoke for near/far culling, radius clipping, and empty compensations.
+- [x] Add CUDA reference export script for projection covars/culling edge cases.
+- [x] Extend exported `.npz` compare support for covars projection fixtures.
+- [x] CUDA/PyTorch numeric parity for existing exported dense pinhole fixture.
 - [ ] Packed projection forward.
 
 ## Task 3.2 - Intersect Tile / Intersect Offset Forward
@@ -383,6 +387,17 @@
 - [x] Reinstall package with `make pip-install`.
 - [x] Validate exported `.npz` parity for Python-facing `rasterize_to_pixels_3dgs_forward` and the forward chain.
 
+## Task 3.13 - Projection 3DGS Fused Forward Parity Cleanup
+- [x] Re-check dense pinhole projection parity against exported CUDA `.npz`.
+- [x] Keep packed projection out of scope for this cleanup.
+- [x] Add C++/Metal smoke for `calc_compensations=false` empty output.
+- [x] Add C++/Metal smoke for near-plane, far-plane, and radius-clip culling.
+- [x] Add CUDA export script `scripts/export_ref/export_projection_ewa_3dgs_fused_edge_cases.py`.
+- [x] Update `scripts/test/compare_exported_npz.py` to support projection fixtures using `covars` instead of `quats`/`scales`.
+- [x] Keep edge-case CUDA fixture optional until exported from a CUDA machine.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate exported `.npz` parity for the existing projection fixture.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -451,4 +466,6 @@
 - [x] Python-facing dense `intersect_tile_forward` matches exported CUDA `.npz` through staged GPU path.
 - [x] Rasterize to pixels C++/Metal smoke validates dense GPU compositing.
 - [x] Python-facing dense `rasterize_to_pixels_3dgs_forward` matches exported CUDA `.npz` through Metal path.
+- [x] Projection C++/Metal smoke validates dense culling and empty compensation behavior.
+- [x] Existing Python-facing dense `projection_ewa_3dgs_fused_forward` matches exported CUDA `.npz`.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
