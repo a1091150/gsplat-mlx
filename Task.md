@@ -34,6 +34,14 @@
 - `make pip-develop`: editable install with `pip install -e . --no-build-isolation`.
 - `make clean`: remove local build and Python packaging artifacts.
 
+## MLX Training Gradient Rule
+- PyTorch can use `retain_grad()` on intermediate tensors such as `means2d`.
+- MLX gradients are produced by `mx.value_and_grad(fn, argnums=...)`, so only selected function arguments receive gradients.
+- If gsplat training or after-training logic needs intermediate gradients such as screen-space `means2d` gradients, use an explicit dummy trainable parameter as the gradient carrier.
+- Prefer the FastGS MLX pattern and name `viewspace_points` when the behavior mirrors FastGS.
+- The dummy gradient proxy must be a visible argument to the loss function and must be included in `value_and_grad(..., argnums=...)`.
+- Related note: `note/mlx_training_gradient_proxy.md`.
+
 ---
 
 # Task 1 - Project/Build Skeleton
@@ -75,6 +83,12 @@
 ## Scope
 - Identify the gsplat CUDA 3DGS forward operators to migrate.
 - Record the source files and exported torch ops before implementing any op.
+
+## Completed
+- [x] Add detailed source map: `note/gsplat_cuda_source_map.md`.
+- [x] Add MLX training gradient proxy rule: `note/mlx_training_gradient_proxy.md`.
+- [x] Map Python wrapper, torch op schema, C++ launcher, CUDA kernel, and target MLX files.
+- [x] Confirm the next implementation slice should continue projection parity before new ops.
 
 ## Source Files
 - `submodules/gsplat/gsplat/cuda/ext.cpp`
@@ -122,7 +136,7 @@
 - Keep APIs close to gsplat CUDA op semantics while using MLX arrays.
 
 ## Planned Subtasks
-- [x] Task 3.1: Projection 3DGS fused forward.
+- [ ] Task 3.1: Projection 3DGS fused forward numeric parity.
 - [ ] Task 3.2: Intersect tile / intersect offset forward.
 - [ ] Task 3.3: Rasterize to pixels 3DGS forward.
 - [ ] Task 3.4: Spherical harmonics forward.
@@ -143,6 +157,7 @@
 - [x] Support covars path or quats/scales path.
 - [x] Support optional opacities and optional compensations output.
 - [x] Build through `make xcode-build`.
+- [x] Add C++ smoke coverage through `make codex-xcode-test`.
 - [ ] CUDA/PyTorch numeric parity.
 - [ ] Packed projection forward.
 
