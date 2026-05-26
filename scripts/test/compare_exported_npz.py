@@ -128,13 +128,16 @@ def compare_rasterize(data: np.lib.npyio.NpzFile) -> list[bool]:
 
 
 def compare_spherical_harmonics(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "dirs": mx_array(data, "input__dirs"),
+        "coeffs": mx_array(data, "input__coeffs"),
+    }
+    if "input__masks" in data.files:
+        inputs["masks"] = mx_array(data, "input__masks")
+
     actual = spherical_harmonics_forward(
         int(scalar(data, "input__degrees_to_use")),
-        {
-            "dirs": mx_array(data, "input__dirs"),
-            "coeffs": mx_array(data, "input__coeffs"),
-            "masks": mx_array(data, "input__masks"),
-        },
+        inputs,
     )
     mx.eval(actual)
     return [compare_array("colors", ref(data, "colors"), mx_to_numpy(actual), atol=1.0e-4, rtol=1.0e-4)]
@@ -240,6 +243,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
 
 EXTRA_COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_edge_cases.npz": compare_projection,
+    "spherical_harmonics_degree4_masks.npz": compare_spherical_harmonics,
 }
 
 

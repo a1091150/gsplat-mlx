@@ -1102,6 +1102,57 @@ void test_spherical_harmonics_forward_gpu_reference() {
   std::cout << "spherical_harmonics_forward GPU reference smoke ok\n";
 }
 
+void test_spherical_harmonics_forward_gpu_degree4_masks() {
+  mx::array dirs(
+      {0.25f, -0.5f, 1.0f,
+       -0.75f, 0.1f, 0.6f,
+       0.0f, 0.0f, 0.0f},
+      {3, 3},
+      mx::float32);
+
+  std::vector<float> coeff_values;
+  coeff_values.reserve(3 * 25 * 3);
+  for (int elem = 0; elem < 3; ++elem) {
+    for (int basis = 0; basis < 25; ++basis) {
+      for (int channel = 0; channel < 3; ++channel) {
+        coeff_values.push_back(
+            0.01f * static_cast<float>(1 + elem * 75 + basis * 3 + channel));
+      }
+    }
+  }
+  mx::array coeffs(coeff_values.data(), {3, 25, 3}, mx::float32);
+  mx::array masks({true, false, true}, {3}, mx::bool_);
+
+  gsplat_core::SphericalHarmonicsInput cpu_input = {
+      .degrees_to_use = 4,
+      .dirs = dirs,
+      .coeffs = coeffs,
+      .masks = masks,
+      .s = mx::Device::cpu,
+      .use_masks = true,
+  };
+  gsplat_core::SphericalHarmonicsInput gpu_input = cpu_input;
+  gpu_input.s = mx::Device::gpu;
+
+  mx::array expected =
+      gsplat_core::gsplat_spherical_harmonics_forward(cpu_input);
+  mx::array actual =
+      gsplat_core::gsplat_spherical_harmonics_forward(gpu_input);
+  mx::eval(expected, actual);
+
+  const float* expected_data = expected.data<float>();
+  const float* actual_data = actual.data<float>();
+  for (int i = 0; i < 9; ++i) {
+    expect_close(actual_data[i], expected_data[i], 1.0e-5f,
+                 "SH GPU degree4 masks");
+  }
+  expect_close(actual_data[3], 0.0f, 1.0e-6f, "SH GPU degree4 masked red");
+  expect_close(actual_data[4], 0.0f, 1.0e-6f, "SH GPU degree4 masked green");
+  expect_close(actual_data[5], 0.0f, 1.0e-6f, "SH GPU degree4 masked blue");
+
+  std::cout << "spherical_harmonics_forward GPU degree4 masks smoke ok\n";
+}
+
 void test_quat_scale_to_covar_preci_reference() {
   mx::array quats(
       {1.0f, 0.0f, 0.0f, 0.0f,
@@ -1423,6 +1474,7 @@ int main() {
     test_rasterize_to_pixels_3dgs_gpu_reference();
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
+    test_spherical_harmonics_forward_gpu_degree4_masks();
     test_quat_scale_to_covar_preci_reference();
     test_quat_scale_to_covar_preci_gpu_reference();
     test_3dgs_forward_chain_smoke();

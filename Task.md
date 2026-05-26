@@ -153,6 +153,7 @@
 - [x] Task 3.11E: Replace dense intersect tile forward with staged GPU path.
 - [x] Task 3.12: Rasterize to pixels 3DGS MLX Primitive + Metal kernel.
 - [x] Task 3.13: Projection 3DGS fused forward parity cleanup.
+- [x] Task 3.14: Spherical harmonics exported parity cleanup.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -235,7 +236,10 @@
 - [x] Move spherical harmonics from C++ reference path to MLX Primitive + Metal kernel.
 - [x] Keep CPU reference path as fallback.
 - [x] Add C++/Metal GPU smoke coverage for degree 1 and masks.
-- [ ] CUDA/PyTorch numeric parity.
+- [x] Add C++/Metal GPU smoke coverage for degree 4 and masks.
+- [x] Add CUDA reference export script for degree 4 and masks.
+- [x] Extend exported `.npz` compare support for optional SH masks fixtures.
+- [x] CUDA/PyTorch numeric parity for existing exported degree 1 masks fixture.
 
 ## Task 3.5 - Quat/Scale To Covariance/Precision Forward
 - [x] Add `gsplat_core/include/gsplat_quat_scale_to_covar.h`.
@@ -398,6 +402,15 @@
 - [x] Validate with `make codex-xcode-test`.
 - [x] Validate exported `.npz` parity for the existing projection fixture.
 
+## Task 3.14 - Spherical Harmonics Exported Parity Cleanup
+- [x] Add C++/Metal smoke coverage for degree 4 SH with masks.
+- [x] Compare degree 4 GPU output against CPU reference fallback.
+- [x] Add CUDA export script `scripts/export_ref/export_spherical_harmonics_degree4_masks.py`.
+- [x] Update `scripts/test/compare_exported_npz.py` to support SH fixtures without masks.
+- [x] Keep degree 4 CUDA fixture optional until exported from a CUDA machine.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate exported `.npz` parity for the existing SH fixture.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -458,6 +471,7 @@
 - [ ] Each migrated op has a manual script that reports input shapes, output shapes, dtypes, and parity status.
 - [x] 3DGS forward low-level chain can render a small fixed scene once projection, intersect, and rasterize are migrated.
 - [x] Spherical harmonics C++/Metal smoke validates GPU degree 1 and masks.
+- [x] Spherical harmonics C++/Metal smoke validates GPU degree 4 and masks.
 - [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
 - [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
 - [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
@@ -468,4 +482,5 @@
 - [x] Python-facing dense `rasterize_to_pixels_3dgs_forward` matches exported CUDA `.npz` through Metal path.
 - [x] Projection C++/Metal smoke validates dense culling and empty compensation behavior.
 - [x] Existing Python-facing dense `projection_ewa_3dgs_fused_forward` matches exported CUDA `.npz`.
+- [x] Existing Python-facing dense `spherical_harmonics_forward` matches exported CUDA `.npz`.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.
