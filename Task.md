@@ -148,6 +148,7 @@
 - [x] Task 3.10: Quat/scale covariance/precision MLX Primitive + Metal kernel.
 - [x] Task 3.11A: Intersect tile count MLX Primitive + Metal kernel.
 - [x] Task 3.11B: Intersect offset MLX Primitive + Metal kernel.
+- [x] Task 3.11C: Intersect tile encode MLX Primitive + Metal kernel first pass.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -186,6 +187,9 @@
 - [x] Add `GSPlatIntersectOffset` MLX Primitive.
 - [x] Add Metal kernel `gsplat_intersect_offset_kernel`.
 - [x] Validate dense sorted `isect_ids` offset generation on GPU.
+- [x] Add `GSPlatIntersectTileEncode` MLX Primitive.
+- [x] Add Metal kernel `gsplat_intersect_tile_encode_kernel`.
+- [x] Validate dense AABB unsorted `isect_ids` and `flatten_ids` generation on GPU.
 - [ ] Move intersect tile counting/encoding from C++ reference path to Metal kernels.
 - [ ] Support packed path with `image_ids` and `gaussian_ids`.
 - [ ] Support AccuTile/SNUGBOX path with `conics` and `opacities`.
@@ -316,6 +320,23 @@
 - [x] Validate `_gsplat_core` target with `make xcode-build`.
 - [ ] Compare against exported CUDA `.npz` reference.
 
+## Task 3.11C - Intersect Tile Encode MLX Primitive + Metal Kernel First Pass
+- [x] Add `gsplat_intersect_tile_encode(...)` C++ entry point.
+- [x] Add `GSPlatIntersectTileEncode` multi-output Primitive.
+- [x] Add Metal kernel `gsplat_intersect_tile_encode_kernel`.
+- [x] Preserve CPU fallback with dense AABB reference implementation.
+- [x] Accept caller-provided dense exclusive `tile_offsets` and `total_isects`.
+- [x] Generate unsorted `isect_ids` and `flatten_ids` on GPU.
+- [x] Keep Python `intersect_tile_forward` on the existing reference path for now.
+- [x] Add C++/Metal smoke coverage for dense AABB encode output.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [x] Confirm existing exported `.npz` parity remains green.
+- [ ] Add GPU prefix sum path for `tile_offsets`.
+- [ ] Add GPU sort/reorder path for `isect_ids` and `flatten_ids`.
+- [ ] Replace full `intersect_tile_forward` with GPU path after prefix/sort are available.
+- [ ] Compare full GPU intersect path against exported CUDA `.npz` reference.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -379,4 +400,5 @@
 - [x] Quat/scale C++/Metal smoke validates GPU covariance and precision outputs.
 - [x] Intersect tile count C++/Metal smoke validates dense AABB GPU counts.
 - [x] Intersect offset C++/Metal smoke validates GPU offsets from sorted `isect_ids`.
+- [x] Intersect tile encode C++/Metal smoke validates dense AABB unsorted GPU ids.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

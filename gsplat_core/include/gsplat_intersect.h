@@ -44,6 +44,11 @@ std::vector<mlx::core::array> gsplat_intersect_tile(
 
 mlx::core::array gsplat_intersect_tile_count(const IntersectTileInput& input);
 
+std::vector<mlx::core::array> gsplat_intersect_tile_encode(
+    const IntersectTileInput& input,
+    const mlx::core::array& tile_offsets,
+    int total_isects);
+
 mlx::core::array gsplat_intersect_offset(
     const mlx::core::array& isect_ids,
     int I,
@@ -55,6 +60,14 @@ struct IntersectOffsetParams {
   int I;
   int tile_width;
   int tile_height;
+};
+
+struct IntersectTileEncodeParams {
+  int I;
+  int tile_size;
+  int tile_width;
+  int tile_height;
+  int total_isects;
 };
 
 class GSPlatIntersectTileCount : public mlx::core::Primitive {
@@ -90,6 +103,42 @@ class GSPlatIntersectTileCount : public mlx::core::Primitive {
 
  private:
   IntersectTileParams params_;
+};
+
+class GSPlatIntersectTileEncode : public mlx::core::Primitive {
+ public:
+  GSPlatIntersectTileEncode(mlx::core::Stream stream,
+                            IntersectTileEncodeParams params)
+      : mlx::core::Primitive(stream), params_(params) {}
+
+  void eval_cpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+  void eval_gpu(const std::vector<mlx::core::array>& inputs,
+                std::vector<mlx::core::array>& outputs) override;
+
+  std::vector<mlx::core::array> jvp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& tangents,
+      const std::vector<int>& argnums) override;
+
+  std::vector<mlx::core::array> vjp(
+      const std::vector<mlx::core::array>& primals,
+      const std::vector<mlx::core::array>& cotangents,
+      const std::vector<int>& argnums,
+      const std::vector<mlx::core::array>& outputs) override;
+
+  std::pair<std::vector<mlx::core::array>, std::vector<int>> vmap(
+      const std::vector<mlx::core::array>& inputs,
+      const std::vector<int>& axes) override;
+
+  const char* name() const override {
+    return "GSPlatIntersectTileEncode";
+  }
+
+  bool is_equivalent(const mlx::core::Primitive& other) const override;
+
+ private:
+  IntersectTileEncodeParams params_;
 };
 
 class GSPlatIntersectOffset : public mlx::core::Primitive {
