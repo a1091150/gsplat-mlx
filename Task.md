@@ -151,6 +151,7 @@
 - [x] Task 3.11C: Intersect tile encode MLX Primitive + Metal kernel first pass.
 - [x] Task 3.11D: Intersect tile GPU prefix/sort/reorder helper path.
 - [x] Task 3.11E: Replace dense intersect tile forward with staged GPU path.
+- [x] Task 3.12: Rasterize to pixels 3DGS MLX Primitive + Metal kernel.
 
 ## Implementation Rules
 - Each op gets a header, C++ implementation, and Metal kernel file.
@@ -210,7 +211,10 @@
 - [x] Support front-to-back alpha compositing.
 - [x] Support optional backgrounds.
 - [x] Add C++ smoke coverage for render colors, render alphas, and last ids.
-- [ ] Move rasterization from C++ reference path to Metal kernels.
+- [x] Move rasterization from C++ reference path to Metal kernels.
+- [x] Keep CPU reference path as fallback.
+- [x] Add C++/Metal GPU smoke coverage for render colors, render alphas, and last ids.
+- [x] Validate Python-facing rasterize output against exported CUDA `.npz`.
 - [ ] Support masks.
 - [ ] Support packed path.
 - [ ] CUDA/PyTorch numeric parity.
@@ -365,6 +369,20 @@
 - [x] Reinstall package with `make pip-install`.
 - [x] Validate exported `.npz` parity for Python-facing `intersect_tile_forward`.
 
+## Task 3.12 - Rasterize To Pixels 3DGS MLX Primitive + Metal Kernel
+- [x] Add `GSPlatRasterizeToPixels3DGS` MLX Primitive.
+- [x] Route dense rasterize GPU stream through Metal kernel.
+- [x] Keep dense CPU reference path as fallback.
+- [x] Route Python `rasterize_to_pixels_3dgs_forward` through GPU.
+- [x] Support dense inputs: `means2d`, `conics`, `colors`, `opacities`, `backgrounds`, `tile_offsets`, and `flatten_ids`.
+- [x] Produce `render_colors`, `render_alphas`, and `last_ids`.
+- [x] Add C++/Metal numeric smoke coverage.
+- [x] Update end-to-end C++ forward chain to use GPU rasterize.
+- [x] Validate with `make codex-xcode-test`.
+- [x] Validate `_gsplat_core` target with `make xcode-build`.
+- [x] Reinstall package with `make pip-install`.
+- [x] Validate exported `.npz` parity for Python-facing `rasterize_to_pixels_3dgs_forward` and the forward chain.
+
 ---
 
 # Task 4 - Binding and Python-Facing API
@@ -431,4 +449,6 @@
 - [x] Intersect tile encode C++/Metal smoke validates dense AABB unsorted GPU ids.
 - [x] Intersect tile staged GPU smoke validates prefix, encode, sort, and reorder.
 - [x] Python-facing dense `intersect_tile_forward` matches exported CUDA `.npz` through staged GPU path.
+- [x] Rasterize to pixels C++/Metal smoke validates dense GPU compositing.
+- [x] Python-facing dense `rasterize_to_pixels_3dgs_forward` matches exported CUDA `.npz` through Metal path.
 - [ ] CUDA/PyTorch parity scripts pass on a CUDA machine.

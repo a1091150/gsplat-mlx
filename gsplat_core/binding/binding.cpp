@@ -191,7 +191,7 @@ nb::dict rasterize_to_pixels_3dgs_forward(
       .masks = masks,
       .tile_offsets = tile_offsets,
       .flatten_ids = flatten_ids,
-      .s = mx::Device::cpu,
+      .s = mx::Device::gpu,
       .params = {
           .image_width = image_width,
           .image_height = image_height,

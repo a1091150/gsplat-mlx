@@ -1,12 +1,21 @@
 #include "include/gsplat_rasterize.h"
 
+#include "include/helper.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
+#include "mlx/backend/common/utils.h"
 #include "mlx/mlx.h"
 #include "mlx/ops.h"
+
+#ifdef _METAL_
+#include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/utils.h"
+#endif
 
 namespace gsplat_core {
 namespace {
@@ -14,6 +23,19 @@ namespace {
 constexpr float kAlphaThreshold = 1.0f / 255.0f;
 constexpr float kMaxAlpha = 0.99f;
 constexpr float kTransmittanceThreshold = 1.0e-4f;
+
+struct RasterizeToPixels3DGSKernelParams {
+  uint32_t I;
+  uint32_t N;
+  uint32_t channels;
+  uint32_t image_width;
+  uint32_t image_height;
+  uint32_t tile_size;
+  uint32_t tile_width;
+  uint32_t tile_height;
+  uint32_t n_isects;
+  uint32_t use_backgrounds;
+};
 
 void validate_rasterize_input(const RasterizeToPixels3DGSInput& input) {
   if (input.params.packed) {
@@ -95,15 +117,63 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
     const RasterizeToPixels3DGSInput& input) {
   validate_rasterize_input(input);
 
-  mx::array means2d = mx::contiguous(input.means2d);
-  mx::array conics = mx::contiguous(input.conics);
-  mx::array colors = mx::contiguous(input.colors);
-  mx::array opacities = mx::contiguous(input.opacities);
-  mx::array backgrounds = mx::contiguous(input.backgrounds);
-  mx::array tile_offsets = mx::contiguous(input.tile_offsets);
-  mx::array flatten_ids = mx::contiguous(input.flatten_ids);
+  const int image_width = input.params.image_width;
+  const int image_height = input.params.image_height;
+  const int channels = input.colors.shape(static_cast<int>(input.colors.ndim()) - 1);
+
+  const int means_ndim = static_cast<int>(input.means2d.ndim());
+  const int tile_offsets_ndim = static_cast<int>(input.tile_offsets.ndim());
+  const int N = input.means2d.shape(means_ndim - 2);
+  const int tile_height = input.tile_offsets.shape(tile_offsets_ndim - 2);
+  const int tile_width = input.tile_offsets.shape(tile_offsets_ndim - 1);
+  const int I = static_cast<int>(
+      input.tile_offsets.size() / (tile_height * tile_width));
+  if (input.means2d.size() / 2 != static_cast<size_t>(I * N)) {
+    throw std::runtime_error(
+        "rasterize_to_pixels_3dgs dense path expects means2d size to equal I * N * 2.");
+  }
+
+  auto prim = std::make_shared<GSPlatRasterizeToPixels3DGS>(
+      to_stream(input.s), input.params);
+  std::vector<mx::Shape> output_shapes = {
+      render_colors_shape(input.tile_offsets, image_height, image_width, channels),
+      render_alphas_shape(input.tile_offsets, image_height, image_width),
+      last_ids_shape(input.tile_offsets, image_height, image_width),
+  };
+  std::vector<mx::Dtype> output_types = {
+      mx::float32,
+      mx::float32,
+      mx::int32,
+  };
+  std::vector<mx::array> inputs = {
+      mx::contiguous(input.means2d),
+      mx::contiguous(input.conics),
+      mx::contiguous(input.colors),
+      mx::contiguous(input.opacities),
+      mx::contiguous(input.backgrounds),
+      mx::contiguous(input.tile_offsets),
+      mx::contiguous(input.flatten_ids),
+  };
+  return mx::array::make_arrays(output_shapes, output_types, prim, inputs);
+}
+
+void GSPlatRasterizeToPixels3DGS::eval_cpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  const auto& means2d = inputs[0];
+  const auto& conics = inputs[1];
+  const auto& colors = inputs[2];
+  const auto& opacities = inputs[3];
+  const auto& backgrounds = inputs[4];
+  const auto& tile_offsets = inputs[5];
+  const auto& flatten_ids = inputs[6];
   mx::eval(means2d, conics, colors, opacities, backgrounds, tile_offsets,
            flatten_ids);
+
+  for (auto& out : outputs) {
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    std::memset(out.data<void>(), 0, out.nbytes());
+  }
 
   const int means_ndim = static_cast<int>(means2d.ndim());
   const int tile_offsets_ndim = static_cast<int>(tile_offsets.ndim());
@@ -111,32 +181,21 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
   const int channels = colors.shape(static_cast<int>(colors.ndim()) - 1);
   const int tile_height = tile_offsets.shape(tile_offsets_ndim - 2);
   const int tile_width = tile_offsets.shape(tile_offsets_ndim - 1);
-  const int I = static_cast<int>(tile_offsets.size() / (tile_height * tile_width));
+  const int I = static_cast<int>(
+      tile_offsets.size() / (tile_height * tile_width));
   const int n_isects = static_cast<int>(flatten_ids.size());
-  const int image_width = input.params.image_width;
-  const int image_height = input.params.image_height;
-  const int tile_size = input.params.tile_size;
-
-  if (means2d.size() / 2 != static_cast<size_t>(I * N)) {
-    throw std::runtime_error(
-        "rasterize_to_pixels_3dgs dense path expects means2d size to equal I * N * 2.");
-  }
-
-  std::vector<float> render_colors(
-      static_cast<size_t>(I * image_height * image_width * channels), 0.0f);
-  std::vector<float> render_alphas(
-      static_cast<size_t>(I * image_height * image_width), 0.0f);
-  std::vector<int32_t> last_ids(
-      static_cast<size_t>(I * image_height * image_width), 0);
 
   const float* means_data = means2d.data<float>();
   const float* conics_data = conics.data<float>();
   const float* colors_data = colors.data<float>();
   const float* opacities_data = opacities.data<float>();
   const float* backgrounds_data =
-      input.params.use_backgrounds ? backgrounds.data<float>() : nullptr;
+      params_.use_backgrounds ? backgrounds.data<float>() : nullptr;
   const int32_t* tile_offsets_data = tile_offsets.data<int32_t>();
   const int32_t* flatten_ids_data = flatten_ids.data<int32_t>();
+  float* render_colors = outputs[kRenderColors].data<float>();
+  float* render_alphas = outputs[kRenderAlphas].data<float>();
+  int32_t* last_ids = outputs[kLastIds].data<int32_t>();
 
   for (int image_id = 0; image_id < I; ++image_id) {
     for (int tile_y = 0; tile_y < tile_height; ++tile_y) {
@@ -146,22 +205,23 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
         const int range_start = tile_offsets_data[offset_index];
         const int range_end =
             (image_id == I - 1 && tile_id == tile_width * tile_height - 1)
-            ? n_isects
-            : tile_offsets_data[offset_index + 1];
+                ? n_isects
+                : tile_offsets_data[offset_index + 1];
 
-        for (int local_y = 0; local_y < tile_size; ++local_y) {
-          const int y = tile_y * tile_size + local_y;
-          if (y >= image_height) {
+        for (int local_y = 0; local_y < params_.tile_size; ++local_y) {
+          const int y = tile_y * params_.tile_size + local_y;
+          if (y >= params_.image_height) {
             continue;
           }
-          for (int local_x = 0; local_x < tile_size; ++local_x) {
-            const int x = tile_x * tile_size + local_x;
-            if (x >= image_width) {
+          for (int local_x = 0; local_x < params_.tile_size; ++local_x) {
+            const int x = tile_x * params_.tile_size + local_x;
+            if (x >= params_.image_width) {
               continue;
             }
 
-            const int pix_id = image_id * image_height * image_width +
-                               y * image_width + x;
+            const int pix_id = image_id * params_.image_height *
+                                   params_.image_width +
+                               y * params_.image_width + x;
             const float px = static_cast<float>(x) + 0.5f;
             const float py = static_cast<float>(y) + 0.5f;
             float T = 1.0f;
@@ -191,8 +251,7 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
 
               const float visibility = alpha * T;
               for (int channel = 0; channel < channels; ++channel) {
-                render_colors[static_cast<size_t>(
-                    pix_id * channels + channel)] +=
+                render_colors[static_cast<size_t>(pix_id * channels + channel)] +=
                     colors_data[g * channels + channel] * visibility;
               }
               cur_idx = idx;
@@ -203,8 +262,8 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
             for (int channel = 0; channel < channels; ++channel) {
               const float background =
                   backgrounds_data == nullptr
-                  ? 0.0f
-                  : backgrounds_data[image_id * channels + channel];
+                      ? 0.0f
+                      : backgrounds_data[image_id * channels + channel];
               render_colors[static_cast<size_t>(pix_id * channels + channel)] +=
                   T * background;
             }
@@ -214,22 +273,125 @@ std::vector<mx::array> gsplat_rasterize_to_pixels_3dgs(
       }
     }
   }
+}
 
-  std::vector<mx::array> outputs;
-  outputs.reserve(3);
-  outputs.push_back(mx::array(
-      render_colors.begin(),
-      render_colors_shape(tile_offsets, image_height, image_width, channels),
-      mx::float32));
-  outputs.push_back(mx::array(
-      render_alphas.begin(),
-      render_alphas_shape(tile_offsets, image_height, image_width),
-      mx::float32));
-  outputs.push_back(mx::array(
-      last_ids.begin(),
-      last_ids_shape(tile_offsets, image_height, image_width),
-      mx::int32));
-  return outputs;
+#ifdef _METAL_
+void GSPlatRasterizeToPixels3DGS::eval_gpu(
+    const std::vector<mx::array>& inputs,
+    std::vector<mx::array>& outputs) {
+  for (auto& out : outputs) {
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    std::memset(out.data<void>(), 0, out.nbytes());
+  }
+
+  const auto& means2d = inputs[0];
+  const auto& conics = inputs[1];
+  const auto& colors = inputs[2];
+  const auto& opacities = inputs[3];
+  const auto& backgrounds = inputs[4];
+  const auto& tile_offsets = inputs[5];
+  const auto& flatten_ids = inputs[6];
+
+  const uint32_t num_pixels =
+      static_cast<uint32_t>(outputs[kLastIds].size());
+  if (num_pixels == 0) {
+    return;
+  }
+
+  const int means_ndim = static_cast<int>(means2d.ndim());
+  const int tile_offsets_ndim = static_cast<int>(tile_offsets.ndim());
+  const int tile_height = tile_offsets.shape(tile_offsets_ndim - 2);
+  const int tile_width = tile_offsets.shape(tile_offsets_ndim - 1);
+  const uint32_t n_tiles = static_cast<uint32_t>(tile_height * tile_width);
+  RasterizeToPixels3DGSKernelParams kernel_params = {
+      .I = static_cast<uint32_t>(tile_offsets.size() / n_tiles),
+      .N = static_cast<uint32_t>(means2d.shape(means_ndim - 2)),
+      .channels = static_cast<uint32_t>(
+          colors.shape(static_cast<int>(colors.ndim()) - 1)),
+      .image_width = static_cast<uint32_t>(params_.image_width),
+      .image_height = static_cast<uint32_t>(params_.image_height),
+      .tile_size = static_cast<uint32_t>(params_.tile_size),
+      .tile_width = static_cast<uint32_t>(tile_width),
+      .tile_height = static_cast<uint32_t>(tile_height),
+      .n_isects = static_cast<uint32_t>(flatten_ids.size()),
+      .use_backgrounds = static_cast<uint32_t>(params_.use_backgrounds),
+  };
+
+  auto& s = stream();
+  auto& d = mx::metal::device(s.device);
+  auto lib = d.get_library("gsplat_core", current_binary_dir());
+  auto kernel = d.get_kernel("gsplat_rasterize_to_pixels_3dgs_forward_kernel", lib);
+
+  auto& compute_encoder = d.get_command_encoder(s.index);
+  compute_encoder.set_compute_pipeline_state(kernel);
+  compute_encoder.set_bytes(kernel_params, 0);
+  compute_encoder.set_input_array(means2d, 1);
+  compute_encoder.set_input_array(conics, 2);
+  compute_encoder.set_input_array(colors, 3);
+  compute_encoder.set_input_array(opacities, 4);
+  compute_encoder.set_input_array(backgrounds, 5);
+  compute_encoder.set_input_array(tile_offsets, 6);
+  compute_encoder.set_input_array(flatten_ids, 7);
+  compute_encoder.set_output_array(outputs[kRenderColors], 8);
+  compute_encoder.set_output_array(outputs[kRenderAlphas], 9);
+  compute_encoder.set_output_array(outputs[kLastIds], 10);
+
+  const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
+  const size_t tgp_size =
+      std::min(static_cast<size_t>(num_pixels), max_threads);
+  MTL::Size group_size = MTL::Size(tgp_size, 1, 1);
+  MTL::Size grid_size = MTL::Size(num_pixels, 1, 1);
+  compute_encoder.dispatch_threads(grid_size, group_size);
+}
+#else
+void GSPlatRasterizeToPixels3DGS::eval_gpu(
+    const std::vector<mx::array>&,
+    std::vector<mx::array>&) {
+  throw std::runtime_error(
+      "GSPlatRasterizeToPixels3DGS has no GPU implementation.");
+}
+#endif
+
+std::vector<mx::array> GSPlatRasterizeToPixels3DGS::jvp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&) {
+  throw std::runtime_error(
+      "GSPlatRasterizeToPixels3DGS jvp is not implemented.");
+}
+
+std::vector<mx::array> GSPlatRasterizeToPixels3DGS::vjp(
+    const std::vector<mx::array>&,
+    const std::vector<mx::array>&,
+    const std::vector<int>&,
+    const std::vector<mx::array>&) {
+  throw std::runtime_error(
+      "GSPlatRasterizeToPixels3DGS vjp is not implemented.");
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+GSPlatRasterizeToPixels3DGS::vmap(const std::vector<mx::array>&,
+                                  const std::vector<int>&) {
+  throw std::runtime_error(
+      "GSPlatRasterizeToPixels3DGS vmap is not implemented.");
+}
+
+bool GSPlatRasterizeToPixels3DGS::is_equivalent(
+    const mx::Primitive& other) const {
+  if (name() != other.name()) {
+    return false;
+  }
+  const auto* other_ptr =
+      dynamic_cast<const GSPlatRasterizeToPixels3DGS*>(&other);
+  if (!other_ptr) {
+    return false;
+  }
+  return params_.image_width == other_ptr->params_.image_width &&
+         params_.image_height == other_ptr->params_.image_height &&
+         params_.tile_size == other_ptr->params_.tile_size &&
+         params_.use_backgrounds == other_ptr->params_.use_backgrounds &&
+         params_.use_masks == other_ptr->params_.use_masks &&
+         params_.packed == other_ptr->params_.packed;
 }
 
 }  // namespace gsplat_core
