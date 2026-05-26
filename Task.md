@@ -153,6 +153,7 @@
 - Binding functions should use clear low-level names based on gsplat CUDA op names.
 - CPU fallback may throw or return zero-filled placeholders until a CPU path is explicitly needed.
 - GPU path is the source of truth for migrated behavior.
+- SH degree forward path and Task 3.11A relationship are recorded in `note/gsplat_3dgs_forward_sh_path.md`.
 
 ## Task 3.1 - Projection 3DGS Fused Forward
 - [x] Add `gsplat_core/include/gsplat_projection.h`.
