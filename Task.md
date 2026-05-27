@@ -636,6 +636,7 @@
 - [x] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 - [x] Task 6.9: Projection EWA 3DGS analytic backward.
 - [x] Task 6.10: Projection forward `vjp(...)` wiring.
+- [ ] Task 6.11: Projection backward full GPU path plan and scaffold.
 
 ## Validation Plan
 - Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
@@ -654,10 +655,11 @@
   absolute-gradient equivalents for `absgrad` behavior.
 - Whether `last_ids` and transmittance handling should exactly mirror CUDA
   saved forward state or recompute small pieces in the backward kernel.
-- Whether first MLX `vjp(...)` wiring should start with the simpler SH or
-  quat/scale op before rasterize/projection.
 - How much of the high-level training wrapper should be delayed until dense
   low-level backward parity is stable.
+- Whether projection forward `vjp(...)` should remain documented as a
+  cross-device CPU-reference limitation until projection backward has a Metal
+  implementation and can run on the same stream as forward.
 
 ## Task 6.1 - Backward CUDA Source Map And Saved-Tensor Contract
 - [x] Add `note/gsplat_backward_source_map.md`.
@@ -785,3 +787,26 @@
 - [x] Extend `scripts/test/autograd_vjp_smoke.py` with projection `value_and_grad` smoke.
 - [x] Add `scripts/test/training_projection_viewspace_proxy_smoke.py` for projection -> rasterize -> viewspace proxy smoke.
 - [x] Update `make codex-training-smoke` to run both viewspace proxy smoke scripts.
+- [ ] Known limitation: without a projection backward Metal path, projection
+  `vjp(...)` currently crosses from GPU forward outputs into a CPU backward
+  primitive. This cross-device autograd graph can produce zero `v_means` /
+  `v_covars` when the `vjp(...)` layer does not force materialization. Avoid
+  treating this as the final training path.
+
+## Task 6.11 - Projection Backward Full GPU Path Plan And Scaffold
+- [x] Add `note/projection_backward_gpu_path.md`.
+- [x] Document why the current projection `vjp(...)` is a CPU-reference path
+  and not a pure GPU training graph.
+- [x] Document that pure GPU graph wiring should use `stream()` instead of
+  forcing `.s = mx::Device::cpu`.
+- [x] Document current full-GPU gap: `GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(...)`.
+- [ ] Implement `gsplat_projection_ewa_3dgs_fused_backward_kernel`.
+- [ ] Support dense pinhole covars path first: `v_means`, `v_covars`, optional
+  `v_viewmats`.
+- [ ] Add quats/scales GPU backward after covars path parity is stable.
+- [ ] Change projection `vjp(...)` backward input from CPU to `stream()` after
+  Metal backward is available.
+- [ ] Validate no projection `vjp(...)` materialization is needed when forward
+  and backward run on the same GPU stream.
+- [ ] Re-enable projection autograd and training smoke as required full-GPU
+  acceptance checks.
