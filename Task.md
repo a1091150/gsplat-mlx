@@ -1209,7 +1209,7 @@
   gsplat `simple_trainer.py`.
 
 ### Implementation Slices
-- [ ] Task 6.28A: Add a small Python strategy/state object to
+- [x] Task 6.28A: Add a small Python strategy/state object to
   `train_scanner_points_multiview_3dgs_mlx.py` with thresholds, counters,
   schedule flags, and summary logging only.
 - [ ] Task 6.28B: Accumulate dense 3DGS `viewspace_points` gradients into

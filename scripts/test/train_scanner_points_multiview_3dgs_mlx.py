@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import mlx.core as mx
@@ -88,6 +89,86 @@ class ScannerPointsSHModel(nn.Module):
 
 def sh_coeff_count(degree: int) -> int:
     return (degree + 1) * (degree + 1)
+
+
+@dataclass
+class ScannerDefaultStrategyConfig:
+    enabled: bool = False
+    prune_opa: float = 0.005
+    grow_grad2d: float = 0.0002
+    grow_scale3d: float = 0.01
+    grow_scale2d: float = 0.05
+    prune_scale3d: float = 0.1
+    prune_scale2d: float = 0.15
+    refine_scale2d_stop_iter: int = 0
+    refine_start_iter: int = 500
+    refine_stop_iter: int = 15000
+    reset_every: int = 3000
+    refine_every: int = 100
+    pause_refine_after_reset: int = 0
+    scene_scale: float = 1.0
+    absgrad: bool = False
+    revised_opacity: bool = False
+
+    def should_refine(self, step: int) -> bool:
+        return (
+            self.enabled
+            and step > self.refine_start_iter
+            and step < self.refine_stop_iter
+            and step % self.refine_every == 0
+            and step % self.reset_every >= self.pause_refine_after_reset
+        )
+
+    def should_reset_opacity(self, step: int) -> bool:
+        return self.enabled and step > 0 and step % self.reset_every == 0
+
+
+class ScannerDefaultStrategyRuntime:
+    def __init__(self, config: ScannerDefaultStrategyConfig, initial_gaussians: int):
+        self.config = config
+        self.initial_gaussians = int(initial_gaussians)
+        self.last_gaussians = int(initial_gaussians)
+        self.events: list[dict] = []
+        self.totals = {
+            "n_clone": 0,
+            "n_split": 0,
+            "n_prune": 0,
+            "n_opacity_reset": 0,
+        }
+
+    def after_optimizer_step(self, step: int, gaussian_count: int) -> None:
+        self.last_gaussians = int(gaussian_count)
+        scheduled_refine = self.config.should_refine(step)
+        scheduled_reset = self.config.should_reset_opacity(step)
+        if not scheduled_refine and not scheduled_reset:
+            return
+        self.events.append(
+            {
+                "step": int(step),
+                "scheduled_refine": bool(scheduled_refine),
+                "scheduled_opacity_reset": bool(scheduled_reset),
+                "num_gaussians_before": int(gaussian_count),
+                "num_gaussians_after": int(gaussian_count),
+                "n_clone": 0,
+                "n_split": 0,
+                "n_prune": 0,
+                "n_opacity_reset": 0,
+                "status": "scheduled_noop_task_6_28a",
+            }
+        )
+
+    def summary(self) -> dict:
+        return {
+            "implementation_phase": "task_6_28a_strategy_skeleton",
+            "enabled": self.config.enabled,
+            "config": asdict(self.config),
+            "initial_gaussians": self.initial_gaussians,
+            "final_gaussians": self.last_gaussians,
+            "events": self.events,
+            "totals": self.totals,
+            "grad2d_accumulation": "not_implemented_task_6_28b",
+            "topology_changes": "not_implemented_task_6_28c_to_6_28f",
+        }
 
 
 def init_rgb_model_from_points(
@@ -455,6 +536,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--color-mode", choices=("rgb", "sh"), default="rgb")
     parser.add_argument("--sh-degree", type=int, default=0)
     parser.add_argument("--max-sh-degree", type=int, default=1)
+    parser.add_argument("--refine-enabled", action="store_true")
+    parser.add_argument("--refine-prune-opa", type=float, default=0.005)
+    parser.add_argument("--refine-grow-grad2d", type=float, default=0.0002)
+    parser.add_argument("--refine-grow-scale3d", type=float, default=0.01)
+    parser.add_argument("--refine-grow-scale2d", type=float, default=0.05)
+    parser.add_argument("--refine-prune-scale3d", type=float, default=0.1)
+    parser.add_argument("--refine-prune-scale2d", type=float, default=0.15)
+    parser.add_argument("--refine-scale2d-stop-iter", type=int, default=0)
+    parser.add_argument("--refine-start-iter", type=int, default=500)
+    parser.add_argument("--refine-stop-iter", type=int, default=15000)
+    parser.add_argument("--refine-reset-every", type=int, default=3000)
+    parser.add_argument("--refine-every", type=int, default=100)
+    parser.add_argument("--refine-pause-after-reset", type=int, default=0)
+    parser.add_argument("--refine-scene-scale", type=float, default=1.0)
+    parser.add_argument("--refine-absgrad", action="store_true")
+    parser.add_argument("--refine-revised-opacity", action="store_true")
     return parser.parse_args()
 
 
@@ -470,7 +567,33 @@ def main() -> None:
         raise ValueError("--num-random-gaussians must be nonnegative")
     if args.random_gaussian_bounds_scale <= 0.0:
         raise ValueError("--random-gaussian-bounds-scale must be positive")
+    if args.refine_every <= 0:
+        raise ValueError("--refine-every must be positive")
+    if args.refine_reset_every <= 0:
+        raise ValueError("--refine-reset-every must be positive")
+    if args.refine_stop_iter <= args.refine_start_iter:
+        raise ValueError("--refine-stop-iter must be greater than --refine-start-iter")
+    if args.refine_scene_scale <= 0.0:
+        raise ValueError("--refine-scene-scale must be positive")
     lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
+    strategy_config = ScannerDefaultStrategyConfig(
+        enabled=args.refine_enabled,
+        prune_opa=args.refine_prune_opa,
+        grow_grad2d=args.refine_grow_grad2d,
+        grow_scale3d=args.refine_grow_scale3d,
+        grow_scale2d=args.refine_grow_scale2d,
+        prune_scale3d=args.refine_prune_scale3d,
+        prune_scale2d=args.refine_prune_scale2d,
+        refine_scale2d_stop_iter=args.refine_scale2d_stop_iter,
+        refine_start_iter=args.refine_start_iter,
+        refine_stop_iter=args.refine_stop_iter,
+        reset_every=args.refine_reset_every,
+        refine_every=args.refine_every,
+        pause_refine_after_reset=args.refine_pause_after_reset,
+        scene_scale=args.refine_scene_scale,
+        absgrad=args.refine_absgrad,
+        revised_opacity=args.refine_revised_opacity,
+    )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     frames = collect_frames(args.data, args.max_frames, args.frame_step, args.start_index)
     cameras = [load_camera(frame, args.width, args.height) for frame in frames]
@@ -490,6 +613,7 @@ def main() -> None:
         model = init_rgb_model_from_points(points, colors, args.point_scale, args.opacity)
     else:
         model = init_sh_model_from_points(points, colors, args.point_scale, args.opacity, args.max_sh_degree)
+    strategy = ScannerDefaultStrategyRuntime(strategy_config, initial_gaussians=model.means.shape[1])
     save_frame_targets(args.out_dir, cameras, targets)
 
     if args.color_mode == "rgb":
@@ -643,6 +767,7 @@ def main() -> None:
                 model.features_rest,
                 model.opacity_logits,
             )
+        strategy.after_optimizer_step(step, model.means.shape[1])
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
@@ -735,6 +860,7 @@ def main() -> None:
             if args.color_mode == "rgb"
             else "colors stores SH degree-0 coefficients; sh stores higher-order coefficients"
         ),
+        "refinement_strategy": strategy.summary(),
         "frame_summaries": frame_summaries,
     }
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
