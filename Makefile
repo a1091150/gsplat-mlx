@@ -9,7 +9,7 @@ RANDOM_3DGS_WIDTH ?= 512
 RANDOM_3DGS_HEIGHT ?= 512
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -20,6 +20,7 @@ help:
 	@printf "  make codex-xcode-test  Build and run the C++ smoke test through the Xcode project.\n"
 	@printf "  make codex-random-png  Render a random 3DGS PNG smoke image for manual inspection.\n"
 	@printf "  make codex-training-smoke  Run MLX value_and_grad viewspace proxy smoke test.\n"
+	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -79,10 +80,15 @@ codex-random-png:
 codex-training-smoke:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
 	conda run -n $(CONDA_ENV) python scripts/test/training_projection_viewspace_proxy_smoke.py
+	conda run -n $(CONDA_ENV) python scripts/test/training_dense_3dgs_loop_smoke.py
+
+codex-dense-training-smoke:
+	conda run -n $(CONDA_ENV) python scripts/test/training_dense_3dgs_loop_smoke.py
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
 	conda run -n $(CONDA_ENV) python scripts/test/training_projection_viewspace_proxy_smoke.py
+	conda run -n $(CONDA_ENV) python scripts/test/training_dense_3dgs_loop_smoke.py
 	conda run -n $(CONDA_ENV) python scripts/test/projection_vjp_guardrails.py
 
 clean:

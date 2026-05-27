@@ -856,3 +856,19 @@
 - [x] Extend Python autograd smoke with projection quats/scales gradients.
 - [x] Update projection VJP guardrails so quats/scales are part of supported
   dense fused pinhole full-GPU coverage.
+
+## Task 6.16 - Dense 3DGS Training Loop Smoke
+- [x] Add `scripts/test/training_dense_3dgs_loop_smoke.py`.
+- [x] Exercise the dense quats/scales projection path followed by dense
+  rasterize to pixels in one `mx.value_and_grad(...)` loss.
+- [x] Include `viewspace_points` as a dummy trainable argument so the MLX path
+  mirrors the FastGS retain-grad proxy design.
+- [x] Request gradients for means, quats, scales, colors, opacities, and
+  `viewspace_points` through sorted `argnums=(0, 1, 2, 3, 4, 5)`.
+- [x] Validate finite loss, nonzero gradients, expected gradient shapes, and a
+  short SGD-style update loop that does not diverge.
+- [x] Add `make codex-dense-training-smoke` and include it in the broader
+  `make codex-training-smoke` / `make codex-projection-guardrails` checks.
+- [ ] Replace the fixed one-tile `flatten_ids` setup with the full GPU
+  intersect/sort/reorder path when dynamic training path coverage becomes the
+  next scope.
