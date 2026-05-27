@@ -77,6 +77,7 @@ nb::dict projection_ewa_3dgs_fused_forward(
   mx::array quats = get_or_empty(inputs, "quats");
   mx::array scales = get_or_empty(inputs, "scales");
   mx::array opacities = get_or_empty(inputs, "opacities");
+  mx::array viewspace_points = get_or_empty(inputs, "viewspace_points");
 
   const bool use_covars = covars.size() != 0;
   const bool use_opacities = opacities.size() != 0;
@@ -88,6 +89,7 @@ nb::dict projection_ewa_3dgs_fused_forward(
       .opacities = opacities,
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = viewspace_points,
       .s = mx::Device::gpu,
       .params = {
           .image_width = image_width,
@@ -110,6 +112,7 @@ nb::dict projection_ewa_3dgs_fused_forward(
   result["depths"] = outputs[gsplat_core::kDepths];
   result["conics"] = outputs[gsplat_core::kConics];
   result["compensations"] = outputs[gsplat_core::kCompensations];
+  result["viewspace_points"] = viewspace_points;
   return result;
 }
 

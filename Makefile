@@ -77,6 +77,7 @@ codex-random-png:
 
 codex-training-smoke:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
+	conda run -n $(CONDA_ENV) python scripts/test/training_projection_viewspace_proxy_smoke.py
 
 clean:
 	rm -rf $(XCODE_BUILD_DIR) build build-* dist *.egg-info python_package/*.egg-info

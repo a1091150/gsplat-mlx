@@ -187,6 +187,7 @@ void test_projection_ewa_3dgs_fused_shapes() {
       .opacities = opacities,
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::cpu),
       .s = mx::Device::cpu,
       .params = {
           .image_width = 64,
@@ -219,8 +220,8 @@ void test_projection_ewa_3dgs_fused_shapes() {
   expect_dtype(outputs[gsplat_core::kCompensations], mx::float32, "compensations");
 
   mx::eval(outputs);
-  expect(outputs[gsplat_core::kRadii].data<int32_t>()[0] == 0,
-         "CPU projection fallback should zero radii");
+  expect(outputs[gsplat_core::kRadii].data<int32_t>()[0] > 0,
+         "CPU projection reference should produce nonzero radii");
   std::cout << "projection_ewa_3dgs_fused CPU shape smoke ok\n";
 }
 
@@ -310,6 +311,7 @@ void test_projection_ewa_3dgs_fused_gpu_numeric() {
       .opacities = opacities,
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .s = mx::Device::gpu,
       .params = {
           .image_width = image_width,
@@ -399,6 +401,7 @@ void test_projection_ewa_3dgs_fused_gpu_culling_and_empty_compensation() {
       .opacities = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .s = mx::Device::gpu,
       .params = {
           .image_width = image_width,
@@ -477,6 +480,7 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
       .opacities = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .s = mx::Device::gpu,
       .params = fwd_params,
   };
@@ -1933,6 +1937,7 @@ void test_3dgs_forward_chain_smoke() {
       .opacities = projection_opacities,
       .viewmats = viewmats,
       .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::gpu),
       .s = mx::Device::gpu,
       .params = {
           .image_width = image_width,

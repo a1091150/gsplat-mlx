@@ -635,6 +635,7 @@
 - [x] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
 - [x] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 - [x] Task 6.9: Projection EWA 3DGS analytic backward.
+- [x] Task 6.10: Projection forward `vjp(...)` wiring.
 
 ## Validation Plan
 - Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
@@ -772,3 +773,15 @@
 - [x] Confirm full exported `.npz` parity remains green.
 - [ ] Add Metal projection backward kernel.
 - [ ] Add packed projection backward support if packed training path becomes in scope.
+
+## Task 6.10 - Projection Forward `vjp(...)` Wiring
+- [x] Wire `GSPlatProjectionEWA3DGSFused::vjp(...)` to `gsplat_projection_ewa_3dgs_fused_backward(...)`.
+- [x] Support gradients for `means` and dense covars path.
+- [x] Support gradients for quats/scales path.
+- [x] Support optional `viewmats` gradients when requested through `argnums`.
+- [x] Add `viewspace_points` as a projection primitive input for the MLX retain-grad proxy path.
+- [x] Return `means2d` cotangent to `viewspace_points` when its primitive argnum is requested.
+- [x] Keep `Ks`, opacities, packed, ortho, and fisheye gradients out of scope.
+- [x] Extend `scripts/test/autograd_vjp_smoke.py` with projection `value_and_grad` smoke.
+- [x] Add `scripts/test/training_projection_viewspace_proxy_smoke.py` for projection -> rasterize -> viewspace proxy smoke.
+- [x] Update `make codex-training-smoke` to run both viewspace proxy smoke scripts.

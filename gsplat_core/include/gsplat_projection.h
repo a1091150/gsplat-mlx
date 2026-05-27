@@ -30,6 +30,7 @@ struct ProjectionEWA3DGSFusedInput {
   mx::array opacities;
   mx::array viewmats;
   mx::array Ks;
+  mx::array viewspace_points;
   mx::StreamOrDevice s;
   ProjectionEWA3DGSFusedParams params;
 };
@@ -54,11 +55,11 @@ struct ProjectionEWA3DGSFusedBackwardInput {
 };
 
 enum ProjectionEWA3DGSFusedOutputIndex {
-  kRadii = 0,
-  kMeans2D = 1,
-  kDepths = 2,
-  kConics = 3,
-  kCompensations = 4,
+  kMeans2D = 0,
+  kDepths = 1,
+  kConics = 2,
+  kCompensations = 3,
+  kRadii = 4,
 };
 
 enum ProjectionEWA3DGSFusedBackwardOutputIndex {

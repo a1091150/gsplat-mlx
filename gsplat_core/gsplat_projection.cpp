@@ -11,6 +11,7 @@
 
 #include "mlx/backend/common/utils.h"
 #include "mlx/backend/cpu/encoder.h"
+#include "mlx/ops.h"
 #include "mlx/utils.h"
 
 #ifdef _METAL_
@@ -55,6 +56,7 @@ struct ProjectionEval {
   float means2d[2];
   float depth;
   float conics[3];
+  float cov2d[4];
   float compensation;
 };
 
@@ -130,6 +132,12 @@ void validate_inputs(const ProjectionEWA3DGSFusedInput& input) {
     throw std::runtime_error(
         "projection_ewa_3dgs_fused_forward expects covars or quats+scales.");
   }
+  if (input.viewspace_points.size() != 0 &&
+      input.viewspace_points.shape() !=
+          projection_shape(input.means, input.viewmats, 2)) {
+    throw std::runtime_error(
+        "viewspace_points must have shape [..., C, N, 2].");
+  }
 }
 
 void validate_backward_inputs(const ProjectionEWA3DGSFusedBackwardInput& input) {
@@ -141,6 +149,7 @@ void validate_backward_inputs(const ProjectionEWA3DGSFusedBackwardInput& input) 
       .opacities = mx::zeros({0}, mx::float32),
       .viewmats = input.viewmats,
       .Ks = input.Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32),
       .s = input.s,
       .params = input.params,
   };
@@ -541,6 +550,10 @@ ProjectionEval projection_eval_one(const float* mean_w,
   out.conics[0] = cov2d[3] * inv_det;
   out.conics[1] = -cov2d[1] * inv_det;
   out.conics[2] = cov2d[0] * inv_det;
+  out.cov2d[0] = cov2d[0];
+  out.cov2d[1] = cov2d[1];
+  out.cov2d[2] = cov2d[2];
+  out.cov2d[3] = cov2d[3];
   out.compensation =
       std::sqrt(std::max(kMinCompensation * kMinCompensation, det_orig / det));
   return out;
@@ -578,17 +591,17 @@ std::vector<mx::array> gsplat_projection_ewa_3dgs_fused(
   const auto scalar_shape = projection_scalar_shape(input.means, input.viewmats);
   std::vector<mx::Shape> output_shapes = {
       projection_shape(input.means, input.viewmats, 2),
-      projection_shape(input.means, input.viewmats, 2),
       scalar_shape,
       projection_shape(input.means, input.viewmats, 3),
       input.params.calc_compensations ? scalar_shape : mx::Shape{0},
+      projection_shape(input.means, input.viewmats, 2),
   };
   std::vector<mx::Dtype> output_types = {
+      input.means.dtype(),
+      input.means.dtype(),
+      input.means.dtype(),
+      input.means.dtype(),
       mx::int32,
-      input.means.dtype(),
-      input.means.dtype(),
-      input.means.dtype(),
-      input.means.dtype(),
   };
 
   std::vector<mx::array> inputs = {
@@ -599,6 +612,7 @@ std::vector<mx::array> gsplat_projection_ewa_3dgs_fused(
       mx::contiguous(input.opacities),
       mx::contiguous(input.viewmats),
       mx::contiguous(input.Ks),
+      mx::contiguous(input.viewspace_points),
   };
   return mx::array::make_arrays(output_shapes, output_types, prim, inputs);
 }
@@ -738,11 +752,95 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
 #endif
 
 void GSPlatProjectionEWA3DGSFused::eval_cpu(
-    const std::vector<mx::array>&,
+    const std::vector<mx::array>& inputs,
     std::vector<mx::array>& outputs) {
+  const auto& means = inputs[0];
+  const auto& covars = inputs[1];
+  const auto& quats = inputs[2];
+  const auto& scales = inputs[3];
+  const auto& opacities = inputs[4];
+  const auto& viewmats = inputs[5];
+  const auto& Ks = inputs[6];
+  const auto& viewspace_points = inputs[7];
+  mx::eval(means, covars, quats, scales, opacities, viewmats, Ks,
+           viewspace_points);
+
   for (auto& out : outputs) {
     out.set_data(mx::allocator::malloc(out.nbytes()));
     std::memset(out.data<void>(), 0, out.nbytes());
+  }
+
+  const int means_ndim = static_cast<int>(means.ndim());
+  const int viewmats_ndim = static_cast<int>(viewmats.ndim());
+  const int N = means.shape(means_ndim - 2);
+  const int C = viewmats.shape(viewmats_ndim - 3);
+  const int B = static_cast<int>(means.size() / (N * 3));
+  const float* means_data = means.data<float>();
+  const float* covars_data = params_.use_covars ? covars.data<float>() : nullptr;
+  const float* quats_data = params_.use_covars ? nullptr : quats.data<float>();
+  const float* scales_data = params_.use_covars ? nullptr : scales.data<float>();
+  const float* opacities_data =
+      params_.use_opacities ? opacities.data<float>() : nullptr;
+  const float* viewmats_data = viewmats.data<float>();
+  const float* Ks_data = Ks.data<float>();
+  int32_t* radii_data = outputs[kRadii].data<int32_t>();
+  float* means2d_data = outputs[kMeans2D].data<float>();
+  float* depths_data = outputs[kDepths].data<float>();
+  float* conics_data = outputs[kConics].data<float>();
+  float* compensations_data =
+      params_.calc_compensations
+          ? outputs[kCompensations].data<float>()
+          : nullptr;
+
+  for (int b = 0; b < B; ++b) {
+    for (int c = 0; c < C; ++c) {
+      for (int n = 0; n < N; ++n) {
+        const int idx = (b * C + c) * N + n;
+        const int gaussian_off = b * N + n;
+        ProjectionEval eval = projection_eval_one(
+            means_data + b * N * 3 + n * 3,
+            covars_data == nullptr ? nullptr : covars_data + gaussian_off * 6,
+            quats_data == nullptr ? nullptr : quats_data + gaussian_off * 4,
+            scales_data == nullptr ? nullptr : scales_data + gaussian_off * 3,
+            viewmats_data + b * C * 16 + c * 16,
+            Ks_data + b * C * 9 + c * 9,
+            params_);
+        if (!eval.valid) {
+          continue;
+        }
+        float extend = kGaussianExtend;
+        if (params_.use_opacities) {
+          float opacity = opacities_data[gaussian_off];
+          if (params_.calc_compensations) {
+            opacity *= eval.compensation;
+          }
+          if (opacity < kAlphaThreshold) {
+            continue;
+          }
+          extend = std::min(
+              kGaussianExtend,
+              std::sqrt(2.0f * std::log(opacity / kAlphaThreshold)));
+        }
+        const int radius_x =
+            static_cast<int>(std::ceil(extend * std::sqrt(eval.cov2d[0])));
+        const int radius_y =
+            static_cast<int>(std::ceil(extend * std::sqrt(eval.cov2d[3])));
+        if (radius_x <= params_.radius_clip || radius_y <= params_.radius_clip) {
+          continue;
+        }
+        radii_data[idx * 2] = radius_x;
+        radii_data[idx * 2 + 1] = radius_y;
+        means2d_data[idx * 2] = eval.means2d[0];
+        means2d_data[idx * 2 + 1] = eval.means2d[1];
+        depths_data[idx] = eval.depth;
+        conics_data[idx * 3] = eval.conics[0];
+        conics_data[idx * 3 + 1] = eval.conics[1];
+        conics_data[idx * 3 + 2] = eval.conics[2];
+        if (compensations_data != nullptr) {
+          compensations_data[idx] = eval.compensation;
+        }
+      }
+    }
   }
 }
 
@@ -762,7 +860,7 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_cpu(
   const auto& v_depths = inputs[10];
   const auto& v_conics = inputs[11];
   const auto& v_compensations = inputs[12];
-  mx::eval(means, covars, quats, scales, viewmats, Ks, radii,
+  mx::eval(means, covars, quats, scales, viewmats, Ks, radii, conics,
            compensations, v_means2d, v_depths, v_conics, v_compensations);
 
   for (auto& out : outputs) {
@@ -912,11 +1010,78 @@ std::vector<mx::array> GSPlatProjectionEWA3DGSFused::jvp(
 }
 
 std::vector<mx::array> GSPlatProjectionEWA3DGSFused::vjp(
-    const std::vector<mx::array>&,
-    const std::vector<mx::array>&,
-    const std::vector<int>&,
-    const std::vector<mx::array>&) {
-  throw std::runtime_error("GSPlatProjectionEWA3DGSFused vjp is not implemented.");
+    const std::vector<mx::array>& primals,
+    const std::vector<mx::array>& cotangents,
+    const std::vector<int>& argnums,
+    const std::vector<mx::array>& outputs) {
+  if (cotangents.size() < (params_.calc_compensations ? 4 : 3)) {
+    throw std::runtime_error(
+        "GSPlatProjectionEWA3DGSFused vjp expects projection cotangents.");
+  }
+  if (outputs.size() < (params_.calc_compensations ? 4 : 3) ||
+      outputs.size() <= kRadii) {
+    throw std::runtime_error(
+        "GSPlatProjectionEWA3DGSFused vjp expects projection forward outputs.");
+  }
+  if (params_.camera_model != 0) {
+    throw std::runtime_error(
+        "GSPlatProjectionEWA3DGSFused vjp currently supports pinhole only.");
+  }
+
+  const bool needs_viewmats =
+      std::find(argnums.begin(), argnums.end(), 5) != argnums.end();
+  ProjectionEWA3DGSFusedBackwardInput input = {
+      .means = primals[0],
+      .covars = primals[1],
+      .quats = primals[2],
+      .scales = primals[3],
+      .viewmats = primals[5],
+      .Ks = primals[6],
+      .radii = outputs[kRadii],
+      .conics = outputs[kConics],
+      .compensations = params_.calc_compensations
+                           ? outputs[kCompensations]
+                           : mx::zeros({0}, mx::float32),
+      .v_means2d = cotangents[kMeans2D],
+      .v_depths = cotangents[kDepths],
+      .v_conics = cotangents[kConics],
+      .v_compensations = params_.calc_compensations
+                             ? cotangents[kCompensations]
+                             : mx::zeros({0}, mx::float32),
+      .s = mx::Device::cpu,
+      .params = params_,
+      .viewmats_requires_grad = needs_viewmats,
+  };
+  auto backward_outputs = gsplat_projection_ewa_3dgs_fused_backward(input);
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      vjps.push_back(backward_outputs[kProjectionVMeans]);
+    } else if (argnum == 1) {
+      vjps.push_back(params_.use_covars
+                         ? backward_outputs[kProjectionVCovars]
+                         : mx::zeros_like(primals[1]));
+    } else if (argnum == 2) {
+      vjps.push_back(params_.use_covars
+                         ? mx::zeros_like(primals[2])
+                         : backward_outputs[kProjectionVQuats]);
+    } else if (argnum == 3) {
+      vjps.push_back(params_.use_covars
+                         ? mx::zeros_like(primals[3])
+                         : backward_outputs[kProjectionVScales]);
+    } else if (argnum == 4 || argnum == 6) {
+      vjps.push_back(mx::zeros_like(primals[argnum]));
+    } else if (argnum == 5) {
+      vjps.push_back(backward_outputs[kProjectionVViewmats]);
+    } else if (argnum == 7) {
+      vjps.push_back(cotangents[kMeans2D]);
+    } else {
+      throw std::runtime_error(
+          "GSPlatProjectionEWA3DGSFused vjp received an unknown argnum.");
+    }
+  }
+  return vjps;
 }
 
 std::pair<std::vector<mx::array>, std::vector<int>>
