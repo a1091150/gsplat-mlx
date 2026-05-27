@@ -1217,7 +1217,7 @@
 - [x] Task 6.28C: Implement prune by opacity first because it only removes rows
   and is easiest to validate.
 - [x] Task 6.28D: Implement clone/duplicate for high-gradient small Gaussians.
-- [ ] Task 6.28E: Implement split for high-gradient large Gaussians with
+- [x] Task 6.28E: Implement split for high-gradient large Gaussians with
   quaternion-derived local random offsets and scale shrink.
 - [ ] Task 6.28F: Add opacity reset.
 - [ ] Task 6.28G: Add summary fields and preview diagnostics:

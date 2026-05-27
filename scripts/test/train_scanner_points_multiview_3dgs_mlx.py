@@ -152,6 +152,7 @@ class ScannerDefaultStrategyRuntime:
             "n_opacity_reset": 0,
         }
         self.last_grad2d_stats = self._grad2d_stats()
+        self.rng = np.random.default_rng(20280628)
 
     def _ensure_size(self, gaussian_count: int) -> None:
         gaussian_count = int(gaussian_count)
@@ -315,6 +316,149 @@ class ScannerDefaultStrategyRuntime:
         mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
         return int(selected.size)
 
+    def _apply_split_to_state(self, split_mask: np.ndarray) -> None:
+        rest = np.where(~split_mask)[0]
+        selected = np.where(split_mask)[0]
+        self.grad2d = np.concatenate([self.grad2d[rest], self.grad2d[selected], self.grad2d[selected]])
+        self.count = np.concatenate([self.count[rest], self.count[selected], self.count[selected]])
+        if self.radii is not None:
+            self.radii = np.concatenate([self.radii[rest], self.radii[selected], self.radii[selected]])
+        self.last_grad2d_stats = self._grad2d_stats()
+
+    def _split_extra_for_param(
+        self,
+        name: str,
+        param: mx.array,
+        selected: np.ndarray,
+        child_means: np.ndarray,
+        child_log_scales: np.ndarray,
+        child_opacity_logits: np.ndarray | None,
+    ) -> mx.array:
+        axis = GAUSSIAN_AXES[name]
+        if name == "means":
+            return mx.array(child_means[None, ...], dtype=param.dtype)
+        if name == "log_scales":
+            return mx.array(child_log_scales[None, ...], dtype=param.dtype)
+        if name == "opacity_logits" and child_opacity_logits is not None:
+            return mx.array(child_opacity_logits[None, ...], dtype=param.dtype)
+        selected_param = self._select_gaussians(param, selected, axis)
+        return mx.concatenate([selected_param, selected_param], axis=axis)
+
+    def _apply_split_to_param_and_optimizer(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        name: str,
+        split_mask: np.ndarray,
+        child_means: np.ndarray,
+        child_log_scales: np.ndarray,
+        child_opacity_logits: np.ndarray | None,
+    ) -> None:
+        if not hasattr(model, name):
+            return
+        axis = GAUSSIAN_AXES[name]
+        rest = np.where(~split_mask)[0].astype(np.int32)
+        selected = np.where(split_mask)[0].astype(np.int32)
+        param = getattr(model, name)
+        rest_param = self._take_gaussians(param, rest, axis)
+        split_param = self._split_extra_for_param(
+            name,
+            param,
+            selected,
+            child_means,
+            child_log_scales,
+            child_opacity_logits,
+        )
+        setattr(model, name, mx.concatenate([rest_param, split_param], axis=axis))
+
+        optimizer = optimizers.get(name)
+        if optimizer is None or name not in optimizer.state:
+            return
+        param_state = optimizer.state[name]
+        for state_name in ("m", "v"):
+            if state_name not in param_state:
+                continue
+            rest_state = self._take_gaussians(param_state[state_name], rest, axis)
+            selected_state = self._select_gaussians(param_state[state_name], selected, axis)
+            split_state = mx.zeros_like(mx.concatenate([selected_state, selected_state], axis=axis))
+            param_state[state_name] = mx.concatenate([rest_state, split_state], axis=axis)
+
+    def _split_high_grad_large(
+        self,
+        step: int,
+        original_gaussian_count: int,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        color_mode: str,
+    ) -> int:
+        visible = self.count > 0.0
+        if not np.any(visible):
+            return 0
+
+        avg_grad2d = np.zeros_like(self.grad2d)
+        avg_grad2d[visible] = self.grad2d[visible] / np.maximum(self.count[visible], 1.0)
+        mx.eval(model.means, model.log_scales, model.normalized_quats, model.opacity_logits)
+        means = np.asarray(model.means[0], dtype=np.float32)
+        log_scales = np.asarray(model.log_scales[0], dtype=np.float32)
+        quats = np.asarray(model.normalized_quats[0], dtype=np.float32)
+        opacity_logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
+
+        scales = np.exp(log_scales)
+        max_scale = scales.max(axis=-1)
+        large = max_scale > self.config.grow_scale3d * self.config.scene_scale
+        split_mask = (avg_grad2d > self.config.grow_grad2d) & large
+        if self.radii is not None and step < self.config.refine_scale2d_stop_iter:
+            split_mask |= self.radii > self.config.grow_scale2d
+        split_mask[int(original_gaussian_count) :] = False
+        selected = np.where(split_mask)[0].astype(np.int32)
+        if selected.size == 0:
+            return 0
+
+        selected_scales = scales[selected]
+        selected_quats = quats[selected]
+        rotmats = quat_wxyz_to_rotmat(selected_quats)
+        local_noise = self.rng.standard_normal((2, selected.size, 3)).astype(np.float32)
+        offsets = np.einsum("nij,nj,bnj->bni", rotmats, selected_scales, local_noise)
+        child_means = (means[selected][None, :, :] + offsets).reshape(-1, 3).astype(np.float32)
+        child_log_scales = np.concatenate(
+            [
+                np.log(np.clip(selected_scales / 1.6, 1.0e-12, None)),
+                np.log(np.clip(selected_scales / 1.6, 1.0e-12, None)),
+            ],
+            axis=0,
+        ).astype(np.float32)
+        child_opacity_logits = None
+        if self.config.revised_opacity:
+            selected_opacity = 1.0 / (1.0 + np.exp(-opacity_logits[selected]))
+            child_opacity = 1.0 - np.sqrt(np.clip(1.0 - selected_opacity, 0.0, 1.0))
+            child_opacity = np.clip(child_opacity, 1.0e-6, 1.0 - 1.0e-6)
+            child_opacity_logits = np.concatenate(
+                [
+                    np.log(child_opacity / (1.0 - child_opacity)),
+                    np.log(child_opacity / (1.0 - child_opacity)),
+                ],
+                axis=0,
+            ).astype(np.float32)
+
+        names = ["means", "quats", "log_scales", "opacity_logits"]
+        if color_mode == "rgb":
+            names.append("color_logits")
+        else:
+            names.extend(["features_dc", "features_rest"])
+        for name in names:
+            self._apply_split_to_param_and_optimizer(
+                model,
+                optimizers,
+                name,
+                split_mask,
+                child_means,
+                child_log_scales,
+                child_opacity_logits,
+            )
+        self._apply_split_to_state(split_mask)
+        mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
+        return int(selected.size)
+
     def _prune_by_opacity(
         self,
         model: Tiny3DGSModel | ScannerPointsSHModel,
@@ -357,8 +501,14 @@ class ScannerDefaultStrategyRuntime:
         if not scheduled_refine and not scheduled_reset:
             return
         n_clone = self._duplicate_high_grad_small(model, optimizers, color_mode) if scheduled_refine else 0
+        n_split = (
+            self._split_high_grad_large(step, gaussian_count, model, optimizers, color_mode)
+            if scheduled_refine
+            else 0
+        )
         n_prune = self._prune_by_opacity(model, optimizers, color_mode) if scheduled_refine else 0
         self.totals["n_clone"] += n_clone
+        self.totals["n_split"] += n_split
         self.totals["n_prune"] += n_prune
         after_count = int(model.means.shape[1])
         self.last_gaussians = after_count
@@ -370,17 +520,17 @@ class ScannerDefaultStrategyRuntime:
                 "num_gaussians_before": int(gaussian_count),
                 "num_gaussians_after": after_count,
                 "n_clone": n_clone,
-                "n_split": 0,
+                "n_split": n_split,
                 "n_prune": n_prune,
                 "n_opacity_reset": 0,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "clone_duplicate_prune_task_6_28d",
+                "status": "clone_split_prune_task_6_28e",
             }
         )
 
     def summary(self) -> dict:
         return {
-            "implementation_phase": "task_6_28d_clone_duplicate",
+            "implementation_phase": "task_6_28e_split",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
@@ -389,7 +539,7 @@ class ScannerDefaultStrategyRuntime:
             "totals": self.totals,
             "grad2d_accumulation": "dense_viewspace_points_gradient",
             "grad2d_stats": self.last_grad2d_stats,
-            "topology_changes": "clone_duplicate_and_opacity_prune_task_6_28d",
+            "topology_changes": "clone_split_and_opacity_prune_task_6_28e",
         }
 
 
