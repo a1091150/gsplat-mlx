@@ -1280,8 +1280,8 @@
 - [x] Add optimizer learning-rate schedules for SH/features, opacity, scales,
   and quats. Current non-position optimizers still use fixed Adam learning
   rates.
-- [ ] Decide whether to add an SSIM/DSSIM component or keep the scanner trainer
-  intentionally L1-only for this MLX smoke path.
+- [x] Add optional L1 + DSSIM image loss with `l1_dssim` as the scanner trainer
+  default and `l1` preserved as a smoke-test mode.
 - [ ] Add optional background/mask handling if scanner frames require it.
 - [ ] Keep camera optimization and appearance embeddings out of scope until the
   low-level gsplat_core path is stable.
@@ -1333,7 +1333,7 @@
 - [x] Task 6.30B: Complete optimizer LR schedules for `features_dc`,
   `features_rest`, `opacity_logits`, `log_scales`, and `quats`, using
   gsplat-style defaults as the baseline while keeping CLI/Makefile overrides.
-- [ ] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
+- [x] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
   a selectable smoke-test mode.
 - [ ] Task 6.30D: Implement real `absgrad` accumulation for
   `viewspace_points`, matching gsplat's absolute-gradient strategy option.

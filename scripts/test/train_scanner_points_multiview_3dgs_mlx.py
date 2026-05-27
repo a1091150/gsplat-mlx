@@ -822,15 +822,95 @@ def render_sh_model(
     }
 
 
-def render_loss_stats(render: dict, target: mx.array) -> tuple[float, float]:
-    loss = nn.losses.l1_loss(render["render_colors"], target)
+def local_average(image: mx.array, window_size: int) -> mx.array:
+    channels = int(image.shape[-1])
+    weight = mx.ones((channels, window_size, window_size, 1), dtype=image.dtype)
+    weight = weight / float(window_size * window_size)
+    return mx.conv2d(image, weight, padding=window_size // 2, groups=channels)
+
+
+def ssim_index(image: mx.array, target: mx.array, window_size: int) -> mx.array:
+    mu_x = local_average(image, window_size)
+    mu_y = local_average(target, window_size)
+    mu_x2 = mu_x * mu_x
+    mu_y2 = mu_y * mu_y
+    mu_xy = mu_x * mu_y
+    sigma_x2 = local_average(image * image, window_size) - mu_x2
+    sigma_y2 = local_average(target * target, window_size) - mu_y2
+    sigma_xy = local_average(image * target, window_size) - mu_xy
+    c1 = 0.01 * 0.01
+    c2 = 0.03 * 0.03
+    numerator = (2.0 * mu_xy + c1) * (2.0 * sigma_xy + c2)
+    denominator = (mu_x2 + mu_y2 + c1) * (sigma_x2 + sigma_y2 + c2)
+    return mx.mean(numerator / mx.maximum(denominator, 1.0e-12))
+
+
+def image_loss_components(
+    image: mx.array,
+    target: mx.array,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
+) -> dict[str, mx.array]:
+    l1 = nn.losses.l1_loss(image, target)
+    if loss_mode == "l1":
+        return {
+            "loss": l1,
+            "l1": l1,
+            "ssim": mx.array(1.0, dtype=image.dtype),
+            "dssim": mx.array(0.0, dtype=image.dtype),
+        }
+    if loss_mode != "l1_dssim":
+        raise ValueError(f"Unsupported loss mode: {loss_mode}")
+    ssim = ssim_index(image, target, ssim_window_size)
+    dssim = (1.0 - ssim) * 0.5
+    loss = (1.0 - ssim_lambda) * l1 + ssim_lambda * dssim
+    return {
+        "loss": loss,
+        "l1": l1,
+        "ssim": ssim,
+        "dssim": dssim,
+    }
+
+
+def image_training_loss(
+    image: mx.array,
+    target: mx.array,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
+) -> mx.array:
+    return image_loss_components(image, target, loss_mode, ssim_lambda, ssim_window_size)["loss"]
+
+
+def render_loss_stats(
+    render: dict,
+    target: mx.array,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
+) -> tuple[float, float, dict]:
+    components = image_loss_components(render["render_colors"], target, loss_mode, ssim_lambda, ssim_window_size)
     diff = render["render_colors"] - target
     mse = mx.mean(diff * diff)
-    mx.eval(loss, mse, render["render_colors"], render["radii"], render["flatten_ids"])
-    loss_value = float(np.asarray(loss))
+    mx.eval(
+        components["loss"],
+        components["l1"],
+        components["ssim"],
+        components["dssim"],
+        mse,
+        render["render_colors"],
+        render["radii"],
+        render["flatten_ids"],
+    )
+    loss_value = float(np.asarray(components["loss"]))
     mse_value = float(np.asarray(mse))
     psnr = float(-10.0 * np.log10(max(mse_value, 1.0e-12)))
-    return loss_value, psnr
+    return loss_value, psnr, {
+        "l1": float(np.asarray(components["l1"])),
+        "ssim": float(np.asarray(components["ssim"])),
+        "dssim": float(np.asarray(components["dssim"])),
+    }
 
 
 def evaluate_rgb_frames(
@@ -840,19 +920,23 @@ def evaluate_rgb_frames(
     width: int,
     height: int,
     tile_size: int,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
 ) -> list[dict]:
     stats = []
     for camera, target in zip(cameras, targets, strict=True):
         viewmats, Ks = camera_arrays(camera)
         viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
         render = render_model(model, viewspace_points, viewmats, Ks, width, height, tile_size)
-        loss, psnr = render_loss_stats(render, target)
+        loss, psnr, loss_components = render_loss_stats(render, target, loss_mode, ssim_lambda, ssim_window_size)
         radii = np.asarray(render["radii"])
         flatten_ids = np.asarray(render["flatten_ids"])
         stats.append(
             {
                 "frame_index": int(camera.index),
                 "loss": loss,
+                "loss_components": loss_components,
                 "psnr": psnr,
                 "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
                 "intersections": int(flatten_ids.shape[0]),
@@ -870,19 +954,23 @@ def evaluate_sh_frames(
     height: int,
     tile_size: int,
     sh_degree: int,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
 ) -> list[dict]:
     stats = []
     for camera, target in zip(cameras, targets, strict=True):
         viewmats, Ks = camera_arrays(camera)
         viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
         render = render_sh_model(model, viewspace_points, viewmats, Ks, width, height, tile_size, sh_degree)
-        loss, psnr = render_loss_stats(render, target)
+        loss, psnr, loss_components = render_loss_stats(render, target, loss_mode, ssim_lambda, ssim_window_size)
         radii = np.asarray(render["radii"])
         flatten_ids = np.asarray(render["flatten_ids"])
         stats.append(
             {
                 "frame_index": int(camera.index),
                 "loss": loss,
+                "loss_components": loss_components,
                 "psnr": psnr,
                 "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
                 "intersections": int(flatten_ids.shape[0]),
@@ -901,10 +989,24 @@ def evaluate_current_frames(
     tile_size: int,
     color_mode: str,
     sh_degree: int,
+    loss_mode: str,
+    ssim_lambda: float,
+    ssim_window_size: int,
 ) -> list[dict]:
     if color_mode == "rgb":
-        return evaluate_rgb_frames(model, cameras, targets, width, height, tile_size)
-    return evaluate_sh_frames(model, cameras, targets, width, height, tile_size, sh_degree)
+        return evaluate_rgb_frames(model, cameras, targets, width, height, tile_size, loss_mode, ssim_lambda, ssim_window_size)
+    return evaluate_sh_frames(
+        model,
+        cameras,
+        targets,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        loss_mode,
+        ssim_lambda,
+        ssim_window_size,
+    )
 
 
 def quat_wxyz_to_rotmat(quats: np.ndarray) -> np.ndarray:
@@ -1228,6 +1330,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opacity", type=float, default=0.65)
     parser.add_argument("--seed", type=int, default=37)
     parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--loss-mode", choices=("l1", "l1_dssim"), default="l1_dssim")
+    parser.add_argument("--ssim-lambda", type=float, default=0.2)
+    parser.add_argument("--ssim-window-size", type=int, default=11)
     parser.add_argument("--lr-means", type=float, default=2.0e-3)
     parser.add_argument("--lr-means-final", type=float, default=None)
     parser.add_argument("--lr-means-delay-mult", type=float, default=1.0)
@@ -1323,6 +1428,10 @@ def main() -> None:
         raise ValueError("--refine-stop-iter must be greater than --refine-start-iter")
     if args.refine_scene_scale <= 0.0:
         raise ValueError("--refine-scene-scale must be positive")
+    if args.ssim_lambda < 0.0 or args.ssim_lambda > 1.0:
+        raise ValueError("--ssim-lambda must be in [0, 1]")
+    if args.ssim_window_size <= 0 or args.ssim_window_size % 2 == 0:
+        raise ValueError("--ssim-window-size must be a positive odd integer")
     lr_means_max_steps = args.steps if args.lr_means_max_steps is None else args.lr_means_max_steps
     lr_colors_max_steps = args.steps if args.lr_colors_max_steps is None else args.lr_colors_max_steps
     lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
@@ -1427,6 +1536,9 @@ def main() -> None:
         args.tile_size,
         args.color_mode,
         initial_active_sh_degree,
+        args.loss_mode,
+        args.ssim_lambda,
+        args.ssim_window_size,
     )
     eval_initial_stats = evaluate_current_frames(
         model,
@@ -1437,6 +1549,9 @@ def main() -> None:
         args.tile_size,
         args.color_mode,
         initial_active_sh_degree,
+        args.loss_mode,
+        args.ssim_lambda,
+        args.ssim_window_size,
     ) if eval_cameras else []
     initial_mean_loss = mean_loss(initial_stats)
     active_sh_degree = initial_active_sh_degree
@@ -1459,7 +1574,14 @@ def main() -> None:
     ) -> mx.array:
         local = Tiny3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
         render = render_model(local, viewspace_points, viewmats, Ks, args.width, args.height, args.tile_size)
-        return nn.losses.l1_loss(render["render_colors"], target), render["radii"]
+        loss = image_training_loss(
+            render["render_colors"],
+            target,
+            args.loss_mode,
+            args.ssim_lambda,
+            args.ssim_window_size,
+        )
+        return loss, render["radii"]
 
     def sh_loss_fn(
         means: mx.array,
@@ -1491,7 +1613,14 @@ def main() -> None:
             args.tile_size,
             active_sh_degree,
         )
-        return nn.losses.l1_loss(render["render_colors"], target), render["radii"]
+        loss = image_training_loss(
+            render["render_colors"],
+            target,
+            args.loss_mode,
+            args.ssim_lambda,
+            args.ssim_window_size,
+        )
+        return loss, render["radii"]
 
     rgb_grad_fn = mx.value_and_grad(rgb_loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     sh_grad_fn = mx.value_and_grad(sh_loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
@@ -1668,6 +1797,9 @@ def main() -> None:
         args.tile_size,
         args.color_mode,
         active_sh_degree,
+        args.loss_mode,
+        args.ssim_lambda,
+        args.ssim_window_size,
     )
     eval_final_stats = evaluate_current_frames(
         model,
@@ -1678,6 +1810,9 @@ def main() -> None:
         args.tile_size,
         args.color_mode,
         active_sh_degree,
+        args.loss_mode,
+        args.ssim_lambda,
+        args.ssim_window_size,
     ) if eval_cameras else []
     final_mean_loss = mean_loss(final_stats)
     target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
@@ -1722,6 +1857,8 @@ def main() -> None:
                 "frame_index": int(final["frame_index"]),
                 "initial_loss": float(initial["loss"]),
                 "final_loss": float(final["loss"]),
+                "initial_loss_components": initial["loss_components"],
+                "final_loss_components": final["loss_components"],
                 "initial_psnr": float(initial["psnr"]),
                 "final_psnr": float(final["psnr"]),
                 "initial_visible_gaussians": int(initial["visible_gaussians"]),
@@ -1737,6 +1874,8 @@ def main() -> None:
                 "frame_index": int(final["frame_index"]),
                 "initial_loss": float(initial["loss"]),
                 "final_loss": float(final["loss"]),
+                "initial_loss_components": initial["loss_components"],
+                "final_loss_components": final["loss_components"],
                 "initial_psnr": float(initial["psnr"]),
                 "final_psnr": float(final["psnr"]),
                 "initial_visible_gaussians": int(initial["visible_gaussians"]),
@@ -1786,7 +1925,13 @@ def main() -> None:
         "eval_start_index": eval_start_index if eval_cameras else None,
         "eval_frame_step": eval_frame_step if eval_cameras else None,
         "steps": args.steps,
-        "loss_function": "mlx.nn.losses.l1_loss",
+        "loss_function": args.loss_mode,
+        "loss_config": {
+            "mode": args.loss_mode,
+            "ssim_lambda": float(args.ssim_lambda),
+            "ssim_window_size": int(args.ssim_window_size),
+            "dssim_formula": "(1 - ssim) / 2",
+        },
         "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
         "image_outputs": "compare_frame_*.png and optional compare_eval_frame_*.png",
         "learning_rate_schedule": lr_schedules,

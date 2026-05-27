@@ -56,6 +56,9 @@ SCANNER_POINTS_EVAL_FRAME_STEP ?= $(SCANNER_POINTS_TRAIN_FRAME_STEP)
 SCANNER_POINTS_EVAL_START_INDEX ?=
 SCANNER_POINTS_TRAIN_STEPS ?= 200
 SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
+SCANNER_POINTS_TRAIN_LOSS_MODE ?= l1_dssim
+SCANNER_POINTS_TRAIN_SSIM_LAMBDA ?= 0.2
+SCANNER_POINTS_TRAIN_SSIM_WINDOW_SIZE ?= 11
 SCANNER_POINTS_TRAIN_LR_MEANS ?= 0.002
 SCANNER_POINTS_TRAIN_LR_MEANS_FINAL ?= 0.0002
 SCANNER_POINTS_TRAIN_LR_MEANS_DELAY_MULT ?= 1.0
@@ -165,6 +168,10 @@ ifneq ($(strip $(SCANNER_POINTS_TRAIN_LR_QUATS_MAX_STEPS)),)
 SCANNER_POINTS_OPTIMIZER_LR_FLAGS += --lr-quats-max-steps $(SCANNER_POINTS_TRAIN_LR_QUATS_MAX_STEPS)
 endif
 
+SCANNER_POINTS_LOSS_FLAGS = --loss-mode $(SCANNER_POINTS_TRAIN_LOSS_MODE)
+SCANNER_POINTS_LOSS_FLAGS += --ssim-lambda $(SCANNER_POINTS_TRAIN_SSIM_LAMBDA)
+SCANNER_POINTS_LOSS_FLAGS += --ssim-window-size $(SCANNER_POINTS_TRAIN_SSIM_WINDOW_SIZE)
+
 SCANNER_POINTS_EVAL_FLAGS = --eval-max-frames $(SCANNER_POINTS_EVAL_FRAMES)
 SCANNER_POINTS_EVAL_FLAGS += --eval-frame-step $(SCANNER_POINTS_EVAL_FRAME_STEP)
 ifneq ($(strip $(SCANNER_POINTS_EVAL_START_INDEX)),)
@@ -216,6 +223,7 @@ help:
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
 	@printf "    Optional: SCANNER_POINTS_EVAL_FRAMES/FRAME_STEP/START_INDEX enable held-out eval compares.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
+	@printf "    Optional: SCANNER_POINTS_TRAIN_LOSS_MODE/SSIM_LAMBDA/SSIM_WINDOW_SIZE configure image loss.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_LR_* configure optimizer LR schedules.\n"
 	@printf "    Optional: SCANNER_POINTS_REFINE_ENABLED=1 plus SCANNER_POINTS_REFINE_* thresholds enable gsplat-style refinement.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
@@ -353,6 +361,7 @@ codex-scanner-points-train-spz:
 		--max-points $(SCANNER_POINTS_TRAIN_MAX_POINTS) \
 		--steps $(SCANNER_POINTS_TRAIN_STEPS) \
 		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE) \
+		$(SCANNER_POINTS_LOSS_FLAGS) \
 		$(SCANNER_POINTS_OPTIMIZER_LR_FLAGS) \
 		--color-mode $(SCANNER_POINTS_TRAIN_COLOR_MODE) \
 		--sh-degree $(SCANNER_POINTS_TRAIN_SH_DEGREE) \
