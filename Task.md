@@ -869,6 +869,22 @@
   short SGD-style update loop that does not diverge.
 - [x] Add `make codex-dense-training-smoke` and include it in the broader
   `make codex-training-smoke` / `make codex-projection-guardrails` checks.
-- [ ] Replace the fixed one-tile `flatten_ids` setup with the full GPU
-  intersect/sort/reorder path when dynamic training path coverage becomes the
-  next scope.
+
+## Task 6.17 - Full Forward Training Path Smoke
+- [x] Replace the fixed one-tile `flatten_ids` setup in
+  `scripts/test/training_dense_3dgs_loop_smoke.py` with the full dense forward
+  routing path:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [x] Use a small `32x32` image with `16x16` tiles so the smoke exercises a
+  `2x2` tile grid instead of a trivial one-tile render.
+- [x] Keep dense quats/scales, pinhole camera, and `viewspace_points` as the
+  trainable-proxy coverage.
+- [x] Apply `mx.stop_gradient(...)` to `tile_offsets` and `flatten_ids` before
+  rasterize, because tile assignment/sorting is discrete routing and should not
+  be differentiated through in this training smoke.
+- [x] Validate nonzero tile intersections and expected tile offset shape before
+  running the short training loop.
+- [x] Validate `make codex-dense-training-smoke`,
+  `make codex-training-smoke`, and `make codex-projection-guardrails`.
+- [ ] Add a larger training smoke that uses backgrounds, masks, or multi-camera
+  batches after the dense single-camera path remains stable.

@@ -2,9 +2,17 @@ import numpy as np
 import mlx.core as mx
 
 from gsplat_core import (
+    intersect_offset_forward,
+    intersect_tile_forward,
     projection_ewa_3dgs_fused_forward,
     rasterize_to_pixels_3dgs_forward,
 )
+
+IMAGE_WIDTH = 32
+IMAGE_HEIGHT = 32
+TILE_SIZE = 16
+TILE_WIDTH = 2
+TILE_HEIGHT = 2
 
 
 def to_numpy(array: mx.array) -> np.ndarray:
@@ -41,8 +49,8 @@ def make_camera() -> tuple[mx.array, mx.array]:
         dtype=mx.float32,
     )
     Ks = mx.array(
-        [[[[18.0, 0.0, 8.0],
-           [0.0, 18.0, 8.0],
+        [[[[18.0, 0.0, 16.0],
+           [0.0, 18.0, 16.0],
            [0.0, 0.0, 1.0]]]],
         dtype=mx.float32,
     )
@@ -68,8 +76,8 @@ def render_scene(
             "Ks": Ks,
             "viewspace_points": viewspace_points,
         },
-        image_width=16,
-        image_height=16,
+        image_width=IMAGE_WIDTH,
+        image_height=IMAGE_HEIGHT,
         eps2d=0.3,
         near_plane=0.01,
         far_plane=100.0,
@@ -77,19 +85,47 @@ def render_scene(
         calc_compensations=False,
         camera_model=0,
     )
-    return rasterize_to_pixels_3dgs_forward(
+    intersections = intersect_tile_forward(
+        {
+            "means2d": projection["means2d"],
+            "radii": projection["radii"],
+            "depths": projection["depths"],
+        },
+        I=1,
+        tile_size=TILE_SIZE,
+        tile_width=TILE_WIDTH,
+        tile_height=TILE_HEIGHT,
+        sort=True,
+        segmented=False,
+    )
+    tile_offsets = intersect_offset_forward(
+        intersections["isect_ids"],
+        I=1,
+        tile_width=TILE_WIDTH,
+        tile_height=TILE_HEIGHT,
+    )
+    tile_offsets = mx.stop_gradient(tile_offsets)
+    flatten_ids = mx.stop_gradient(intersections["flatten_ids"])
+    render = rasterize_to_pixels_3dgs_forward(
         {
             "means2d": projection["means2d"],
             "conics": projection["conics"],
             "colors": colors,
             "opacities": opacities,
-            "tile_offsets": mx.array([[[0]]], dtype=mx.int32),
-            "flatten_ids": mx.array([0, 1, 2, 3], dtype=mx.int32),
+            "tile_offsets": tile_offsets,
+            "flatten_ids": flatten_ids,
         },
-        image_width=16,
-        image_height=16,
-        tile_size=16,
+        image_width=IMAGE_WIDTH,
+        image_height=IMAGE_HEIGHT,
+        tile_size=TILE_SIZE,
     )
+    return {
+        **render,
+        "tiles_per_gauss": mx.stop_gradient(intersections["tiles_per_gauss"]),
+        "isect_ids": mx.stop_gradient(intersections["isect_ids"]),
+        "flatten_ids": flatten_ids,
+        "tile_offsets": tile_offsets,
+    }
 
 
 def main() -> None:
@@ -137,7 +173,19 @@ def main() -> None:
     )
     target_colors_img = target_render["render_colors"]
     target_alphas_img = target_render["render_alphas"]
-    mx.eval(target_colors_img, target_alphas_img)
+    mx.eval(
+        target_colors_img,
+        target_alphas_img,
+        target_render["tiles_per_gauss"],
+        target_render["isect_ids"],
+        target_render["flatten_ids"],
+        target_render["tile_offsets"],
+    )
+    assert_shape("tile_offsets", target_render["tile_offsets"], (1, TILE_HEIGHT, TILE_WIDTH))
+    if int(np.sum(to_numpy(target_render["tiles_per_gauss"]))) <= 0:
+        raise AssertionError("full forward training smoke expected nonzero tile intersections")
+    if int(np.asarray(target_render["flatten_ids"]).shape[0]) <= 0:
+        raise AssertionError("full forward training smoke expected nonempty flatten_ids")
 
     means = target_means + mx.array(
         [[[0.04, -0.03, 0.03],
