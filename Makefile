@@ -18,9 +18,16 @@ TINY_MULTIVIEW_N ?= 1024
 TINY_MULTIVIEW_WIDTH ?= 512
 TINY_MULTIVIEW_HEIGHT ?= 512
 TINY_MULTIVIEW_VIEWS ?= 3
+SCANNER_DATASET ?= /Users/yangdunfu/Downloads/2026_05_04_16_51_29
+SCANNER_SMOKE_OUT ?= outputs/scanner_dataset_random_render
+SCANNER_SMOKE_WIDTH ?= 512
+SCANNER_SMOKE_HEIGHT ?= 512
+SCANNER_SMOKE_N ?= 1024
+SCANNER_SMOKE_FRAMES ?= 3
+SCANNER_SMOKE_FRAME_STEP ?= 1
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -34,6 +41,7 @@ help:
 	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-tiny-train  Run a tiny MLX nn.Module+Adam 3DGS training example.\n"
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
+	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -114,6 +122,16 @@ codex-tiny-multiview-train:
 		--num-views $(TINY_MULTIVIEW_VIEWS) \
 		--width $(TINY_MULTIVIEW_WIDTH) \
 		--height $(TINY_MULTIVIEW_HEIGHT)
+
+codex-scanner-dataset-smoke:
+	conda run -n $(CONDA_ENV) python scripts/test/scanner_dataset_random_render_smoke.py \
+		--data "$(SCANNER_DATASET)" \
+		--out-dir "$(SCANNER_SMOKE_OUT)" \
+		--width $(SCANNER_SMOKE_WIDTH) \
+		--height $(SCANNER_SMOKE_HEIGHT) \
+		--num-gaussians $(SCANNER_SMOKE_N) \
+		--max-frames $(SCANNER_SMOKE_FRAMES) \
+		--frame-step $(SCANNER_SMOKE_FRAME_STEP)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

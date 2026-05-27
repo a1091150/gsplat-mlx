@@ -952,3 +952,25 @@
   validated.
 - [ ] Validate that the exporter writes a nonempty `.spz` file and that the
   training path still works when export is disabled.
+
+## Task 6.21 - Scanner Dataset Camera/Image Loader Smoke
+- [x] Add `scripts/test/scanner_dataset_random_render_smoke.py`.
+- [x] Read scanner dataset `frame_*.jpg` / `frame_*.json` pairs from a dataset
+  directory such as `/Users/yangdunfu/Downloads/2026_05_04_16_51_29`.
+- [x] Do not read `points.ply` in this step; initialize random Gaussians
+  instead.
+- [x] Convert scanner JSON `intrinsics` to gsplat-style `Ks` with resize scale
+  applied.
+- [x] Convert scanner JSON `cameraPoseARFrame` to gsplat-style row-major
+  world-to-camera `viewmats`, following the FastGS scanner axis transform and
+  camera-axis flip as the first compatibility assumption.
+- [x] Render random Gaussians through the current gsplat_core forward path:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [x] Save resized target images, random render previews, and
+  `debug_camera_metadata.json` with `K`, `viewmat`, visible Gaussian count, and
+  intersection count.
+- [x] Add `make codex-scanner-dataset-smoke` and related Makefile variables.
+- [x] Validate a short smoke against the scanner dataset with visible Gaussians
+  and nonzero intersections.
+- [ ] Compare camera convention against a known-good gsplat/PyTorch or viewer
+  render before using this loader for real training.
