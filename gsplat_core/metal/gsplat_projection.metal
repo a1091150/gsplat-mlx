@@ -285,3 +285,201 @@ kernel void gsplat_projection_ewa_3dgs_fused_forward_kernel(
     compensations[idx] = compensation;
   }
 }
+
+inline void add_blur_vjp(float eps2d,
+                         float4 conic_blur,
+                         float compensation,
+                         float v_compensation,
+                         thread float4& v_covar) {
+  float det_conic_blur = conic_blur.x * conic_blur.w - conic_blur.y * conic_blur.z;
+  float v_sqr_comp = v_compensation * 0.5f / (compensation + 1.0e-6f);
+  float one_minus_sqr_comp = 1.0f - compensation * compensation;
+  v_covar.x += v_sqr_comp * (one_minus_sqr_comp * conic_blur.x -
+                             eps2d * det_conic_blur);
+  v_covar.y += v_sqr_comp * (one_minus_sqr_comp * conic_blur.y);
+  v_covar.z += v_sqr_comp * (one_minus_sqr_comp * conic_blur.z);
+  v_covar.w += v_sqr_comp * (one_minus_sqr_comp * conic_blur.w -
+                             eps2d * det_conic_blur);
+}
+
+inline void persp_proj_vjp(float3 mean3d,
+                           float3x3 cov3d,
+                           float fx,
+                           float fy,
+                           float cx,
+                           float cy,
+                           uint width,
+                           uint height,
+                           float4 v_cov2d,
+                           float2 v_mean2d,
+                           thread float3& v_mean3d,
+                           thread float3x3& v_cov3d) {
+  float x = mean3d.x;
+  float y = mean3d.y;
+  float z = mean3d.z;
+  float tan_fovx = 0.5f * float(width) / fx;
+  float tan_fovy = 0.5f * float(height) / fy;
+  float lim_x_pos = (float(width) - cx) / fx + 0.3f * tan_fovx;
+  float lim_x_neg = cx / fx + 0.3f * tan_fovx;
+  float lim_y_pos = (float(height) - cy) / fy + 0.3f * tan_fovy;
+  float lim_y_neg = cy / fy + 0.3f * tan_fovy;
+  float rz = 1.0f / z;
+  float rz2 = rz * rz;
+  float rz3 = rz2 * rz;
+  float x_rz = x * rz;
+  float y_rz = y * rz;
+  float tx = z * min(lim_x_pos, max(-lim_x_neg, x_rz));
+  float ty = z * min(lim_y_pos, max(-lim_y_neg, y_rz));
+
+  float J[6] = {
+      fx * rz, 0.0f, -fx * tx * rz2,
+      0.0f, fy * rz, -fy * ty * rz2,
+  };
+  float cov[9] = {
+      cov3d[0][0], cov3d[1][0], cov3d[2][0],
+      cov3d[0][1], cov3d[1][1], cov3d[2][1],
+      cov3d[0][2], cov3d[1][2], cov3d[2][2],
+  };
+  float vcov2[4] = {v_cov2d.x, v_cov2d.y, v_cov2d.z, v_cov2d.w};
+  float vcov3[9] = {};
+  for (uint a = 0; a < 3; ++a) {
+    for (uint b = 0; b < 3; ++b) {
+      for (uint r = 0; r < 2; ++r) {
+        for (uint c = 0; c < 2; ++c) {
+          vcov3[a * 3 + b] += J[r * 3 + a] * vcov2[r * 2 + c] *
+                              J[c * 3 + b];
+        }
+      }
+    }
+  }
+  v_cov3d = float3x3(
+      float3(vcov3[0], vcov3[3], vcov3[6]),
+      float3(vcov3[1], vcov3[4], vcov3[7]),
+      float3(vcov3[2], vcov3[5], vcov3[8]));
+
+  v_mean3d.x += fx * rz * v_mean2d.x;
+  v_mean3d.y += fy * rz * v_mean2d.y;
+  v_mean3d.z += -(fx * x * v_mean2d.x + fy * y * v_mean2d.y) * rz2;
+
+  float v_J[6] = {};
+  for (uint r = 0; r < 2; ++r) {
+    for (uint a = 0; a < 3; ++a) {
+      float left = 0.0f;
+      float right = 0.0f;
+      for (uint c = 0; c < 2; ++c) {
+        for (uint b = 0; b < 3; ++b) {
+          left += vcov2[r * 2 + c] * J[c * 3 + b] * cov[a * 3 + b];
+          right += vcov2[c * 2 + r] * J[c * 3 + b] * cov[b * 3 + a];
+        }
+      }
+      v_J[r * 3 + a] = left + right;
+    }
+  }
+
+  if (x_rz <= lim_x_pos && x_rz >= -lim_x_neg) {
+    v_mean3d.x += -fx * rz2 * v_J[2];
+  } else {
+    v_mean3d.z += -fx * rz3 * tx * v_J[2];
+  }
+  if (y_rz <= lim_y_pos && y_rz >= -lim_y_neg) {
+    v_mean3d.y += -fy * rz2 * v_J[5];
+  } else {
+    v_mean3d.z += -fy * rz3 * ty * v_J[5];
+  }
+  v_mean3d.z += -fx * rz2 * v_J[0] - fy * rz2 * v_J[4] +
+                2.0f * fx * tx * rz3 * v_J[2] +
+                2.0f * fy * ty * rz3 * v_J[5];
+}
+
+kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
+    constant ProjectionKernelParams& params [[buffer(0)]],
+    const device float* means [[buffer(1)]],
+    const device float* covars [[buffer(2)]],
+    const device float* viewmats [[buffer(3)]],
+    const device float* Ks [[buffer(4)]],
+    const device int* radii [[buffer(5)]],
+    const device float* conics [[buffer(6)]],
+    const device float* compensations [[buffer(7)]],
+    const device float* v_means2d [[buffer(8)]],
+    const device float* v_depths [[buffer(9)]],
+    const device float* v_conics [[buffer(10)]],
+    const device float* v_compensations [[buffer(11)]],
+    device float* v_means [[buffer(12)]],
+    device float* v_covars [[buffer(13)]],
+    uint gaussian_idx [[thread_position_in_grid]]) {
+  if (gaussian_idx >= params.B * params.N) {
+    return;
+  }
+
+  uint bid = gaussian_idx / params.N;
+  uint gid = gaussian_idx % params.N;
+  uint mean_off = bid * params.N * 3 + gid * 3;
+  uint cov_off = bid * params.N * 6 + gid * 6;
+  float3 mean_w = float3(means[mean_off], means[mean_off + 1], means[mean_off + 2]);
+  float3 v_mean_w_total = float3(0.0f);
+  float3x3 v_covar_w_total = float3x3(float3(0.0f), float3(0.0f), float3(0.0f));
+
+  for (uint cid = 0; cid < params.C; ++cid) {
+    uint idx = (bid * params.C + cid) * params.N + gid;
+    if (radii[idx * 2] <= 0 || radii[idx * 2 + 1] <= 0) {
+      continue;
+    }
+
+    uint view_off = bid * params.C * 16 + cid * 16;
+    uint k_off = bid * params.C * 9 + cid * 9;
+    float3x3 R = float3x3(
+        float3(viewmats[view_off + 0], viewmats[view_off + 4], viewmats[view_off + 8]),
+        float3(viewmats[view_off + 1], viewmats[view_off + 5], viewmats[view_off + 9]),
+        float3(viewmats[view_off + 2], viewmats[view_off + 6], viewmats[view_off + 10]));
+    float3 t = float3(viewmats[view_off + 3], viewmats[view_off + 7], viewmats[view_off + 11]);
+    float3 mean_c = R * mean_w + t;
+    float3x3 covar_w = float3x3(
+        float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
+        float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
+        float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    float3x3 covar_c = R * covar_w * transpose(R);
+
+    float c0 = conics[idx * 3];
+    float c1 = conics[idx * 3 + 1];
+    float c2 = conics[idx * 3 + 2];
+    float4 covar2d_inv = float4(c0, c1, c1, c2);
+    float4 v_covar2d_inv =
+        float4(v_conics[idx * 3], 0.5f * v_conics[idx * 3 + 1],
+               0.5f * v_conics[idx * 3 + 1], v_conics[idx * 3 + 2]);
+    float4 tmp = float4(
+        covar2d_inv.x * v_covar2d_inv.x + covar2d_inv.y * v_covar2d_inv.z,
+        covar2d_inv.x * v_covar2d_inv.y + covar2d_inv.y * v_covar2d_inv.w,
+        covar2d_inv.z * v_covar2d_inv.x + covar2d_inv.w * v_covar2d_inv.z,
+        covar2d_inv.z * v_covar2d_inv.y + covar2d_inv.w * v_covar2d_inv.w);
+    float4 v_covar2d = -float4(
+        tmp.x * covar2d_inv.x + tmp.y * covar2d_inv.z,
+        tmp.x * covar2d_inv.y + tmp.y * covar2d_inv.w,
+        tmp.z * covar2d_inv.x + tmp.w * covar2d_inv.z,
+        tmp.z * covar2d_inv.y + tmp.w * covar2d_inv.w);
+    if (params.calc_compensations != 0) {
+      add_blur_vjp(params.eps2d, covar2d_inv, compensations[idx],
+                   v_compensations[idx], v_covar2d);
+    }
+
+    float3 v_mean_c = float3(0.0f, 0.0f, v_depths[idx]);
+    float3x3 v_covar_c;
+    float2 v_mean2d_val = float2(v_means2d[idx * 2], v_means2d[idx * 2 + 1]);
+    persp_proj_vjp(mean_c, covar_c, Ks[k_off + 0], Ks[k_off + 4],
+                   Ks[k_off + 2], Ks[k_off + 5], params.image_width,
+                   params.image_height, v_covar2d, v_mean2d_val, v_mean_c,
+                   v_covar_c);
+
+    v_mean_w_total += transpose(R) * v_mean_c;
+    v_covar_w_total += transpose(R) * v_covar_c * R;
+  }
+
+  v_means[mean_off] = v_mean_w_total.x;
+  v_means[mean_off + 1] = v_mean_w_total.y;
+  v_means[mean_off + 2] = v_mean_w_total.z;
+  v_covars[cov_off] = v_covar_w_total[0][0];
+  v_covars[cov_off + 1] = v_covar_w_total[1][0] + v_covar_w_total[0][1];
+  v_covars[cov_off + 2] = v_covar_w_total[2][0] + v_covar_w_total[0][2];
+  v_covars[cov_off + 3] = v_covar_w_total[1][1];
+  v_covars[cov_off + 4] = v_covar_w_total[2][1] + v_covar_w_total[1][2];
+  v_covars[cov_off + 5] = v_covar_w_total[2][2];
+}

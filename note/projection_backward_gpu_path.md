@@ -54,13 +54,29 @@ forward and projection backward on the same GPU stream and avoid explicit
 
 ## Full GPU gap
 
-The missing piece is:
+The first-pass implementation now exists for the dense pinhole covars path:
 
 ```text
 GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(...)
+gsplat_projection_ewa_3dgs_fused_backward_kernel
 ```
 
-Until this exists, projection training has two imperfect choices:
+It supports:
+
+```text
+use_covars = true
+camera_model = pinhole
+calc_compensations = true/false
+v_means
+v_covars
+```
+
+The remaining gap before projection autograd can be treated as a pure GPU
+training path is wiring `GSPlatProjectionEWA3DGSFused::vjp(...)` to run the
+backward primitive on `stream()` and validating that no `vjp(...)`
+materialization is needed.
+
+Until that is validated, projection training still has two imperfect choices:
 
 ```text
 1. CPU reference backward
@@ -92,7 +108,7 @@ v_means
 v_covars
 ```
 
-Next outputs after covars parity is stable:
+Next outputs after covars GPU path parity is stable:
 
 ```text
 v_viewmats
@@ -124,4 +140,3 @@ make codex-training-smoke
 
 all pass with projection `vjp(...)` using `stream()` and without extra
 `mx::eval(...)` materialization in the `vjp(...)` layer.
-

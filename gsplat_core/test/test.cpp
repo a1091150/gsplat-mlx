@@ -484,8 +484,10 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
       .s = mx::Device::gpu,
       .params = fwd_params,
   };
+  gsplat_core::ProjectionEWA3DGSFusedInput cpu_fwd_input = fwd_input;
+  cpu_fwd_input.s = mx::Device::cpu;
   std::vector<mx::array> fwd =
-      gsplat_core::gsplat_projection_ewa_3dgs_fused(fwd_input);
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(cpu_fwd_input);
   mx::array radii({1, 1, 1, 1}, {1, 1, 2, 2}, mx::int32);
   mx::array v_means2d(
       {0.2f, -0.1f,
@@ -533,6 +535,26 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
     has_nonzero = has_nonzero || std::fabs(v_means[i]) > 1.0e-6f;
   }
   expect(has_nonzero, "projection backward v_means should be nonzero");
+
+  gsplat_core::ProjectionEWA3DGSFusedBackwardInput gpu_bwd_input = bwd_input;
+  gpu_bwd_input.s = mx::Device::gpu;
+  std::vector<mx::array> gpu_outputs =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(gpu_bwd_input);
+  mx::eval(gpu_outputs);
+  const float* gpu_v_means =
+      gpu_outputs[gsplat_core::kProjectionVMeans].data<float>();
+  const float* gpu_v_covars =
+      gpu_outputs[gsplat_core::kProjectionVCovars].data<float>();
+  const float* cpu_v_covars =
+      outputs[gsplat_core::kProjectionVCovars].data<float>();
+  for (int i = 0; i < 6; ++i) {
+    expect_close(gpu_v_means[i], v_means[i], 1.0e-2f,
+                 "projection backward GPU v_means");
+  }
+  for (int i = 0; i < 12; ++i) {
+    expect_close(gpu_v_covars[i], cpu_v_covars[i], 1.0e-1f,
+                 "projection backward GPU v_covars");
+  }
 
   std::cout << "projection_ewa_3dgs_fused backward reference smoke ok\n";
 }

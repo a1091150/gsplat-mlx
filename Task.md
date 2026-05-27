@@ -636,7 +636,7 @@
 - [x] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 - [x] Task 6.9: Projection EWA 3DGS analytic backward.
 - [x] Task 6.10: Projection forward `vjp(...)` wiring.
-- [ ] Task 6.11: Projection backward full GPU path plan and scaffold.
+- [x] Task 6.11: Projection backward full GPU path plan and scaffold.
 
 ## Validation Plan
 - Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
@@ -800,9 +800,11 @@
 - [x] Document that pure GPU graph wiring should use `stream()` instead of
   forcing `.s = mx::Device::cpu`.
 - [x] Document current full-GPU gap: `GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(...)`.
-- [ ] Implement `gsplat_projection_ewa_3dgs_fused_backward_kernel`.
-- [ ] Support dense pinhole covars path first: `v_means`, `v_covars`, optional
-  `v_viewmats`.
+- [x] Implement first-pass `gsplat_projection_ewa_3dgs_fused_backward_kernel`.
+- [x] Support dense pinhole covars path first: `v_means`, `v_covars`.
+- [x] Support `calc_compensations=true/false` in the dense covars GPU kernel.
+- [x] Add C++/Xcode smoke comparing projection GPU backward against CPU reference.
+- [ ] Add optional `v_viewmats`.
 - [ ] Add quats/scales GPU backward after covars path parity is stable.
 - [ ] Change projection `vjp(...)` backward input from CPU to `stream()` after
   Metal backward is available.
