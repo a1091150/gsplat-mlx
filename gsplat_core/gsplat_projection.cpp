@@ -42,6 +42,14 @@ struct Mat3 {
   float v[9];
 };
 
+struct Mat2 {
+  float v[4];
+};
+
+struct Vec3 {
+  float v[3];
+};
+
 struct ProjectionEval {
   bool valid;
   float means2d[2];
@@ -222,6 +230,238 @@ Mat3 transpose(const Mat3& a) {
       a.v[1], a.v[4], a.v[7],
       a.v[2], a.v[5], a.v[8],
   }};
+}
+
+Mat2 mat2_mul(const Mat2& a, const Mat2& b) {
+  return Mat2{{
+      a.v[0] * b.v[0] + a.v[1] * b.v[2],
+      a.v[0] * b.v[1] + a.v[1] * b.v[3],
+      a.v[2] * b.v[0] + a.v[3] * b.v[2],
+      a.v[2] * b.v[1] + a.v[3] * b.v[3],
+  }};
+}
+
+Mat2 mat2_transpose(const Mat2& a) {
+  return Mat2{{a.v[0], a.v[2], a.v[1], a.v[3]}};
+}
+
+Mat2 mat2_scale(const Mat2& a, float scale) {
+  return Mat2{{a.v[0] * scale, a.v[1] * scale, a.v[2] * scale, a.v[3] * scale}};
+}
+
+Vec3 mat3_vec_mul(const Mat3& a, const Vec3& x) {
+  return Vec3{{
+      a.v[0] * x.v[0] + a.v[1] * x.v[1] + a.v[2] * x.v[2],
+      a.v[3] * x.v[0] + a.v[4] * x.v[1] + a.v[5] * x.v[2],
+      a.v[6] * x.v[0] + a.v[7] * x.v[1] + a.v[8] * x.v[2],
+  }};
+}
+
+Vec3 mat3_transpose_vec_mul(const Mat3& a, const Vec3& x) {
+  return Vec3{{
+      a.v[0] * x.v[0] + a.v[3] * x.v[1] + a.v[6] * x.v[2],
+      a.v[1] * x.v[0] + a.v[4] * x.v[1] + a.v[7] * x.v[2],
+      a.v[2] * x.v[0] + a.v[5] * x.v[1] + a.v[8] * x.v[2],
+  }};
+}
+
+void add_blur_vjp(float eps2d,
+                  const Mat2& conic_blur,
+                  float compensation,
+                  float v_compensation,
+                  Mat2& v_covar) {
+  const float det_conic_blur =
+      conic_blur.v[0] * conic_blur.v[3] - conic_blur.v[1] * conic_blur.v[2];
+  const float v_sqr_comp = v_compensation * 0.5f / (compensation + 1.0e-6f);
+  const float one_minus_sqr_comp = 1.0f - compensation * compensation;
+  v_covar.v[0] +=
+      v_sqr_comp * (one_minus_sqr_comp * conic_blur.v[0] -
+                    eps2d * det_conic_blur);
+  v_covar.v[1] +=
+      v_sqr_comp * (one_minus_sqr_comp * conic_blur.v[1]);
+  v_covar.v[2] +=
+      v_sqr_comp * (one_minus_sqr_comp * conic_blur.v[2]);
+  v_covar.v[3] +=
+      v_sqr_comp * (one_minus_sqr_comp * conic_blur.v[3] -
+                    eps2d * det_conic_blur);
+}
+
+void persp_proj_vjp(const Vec3& mean3d,
+                    const Mat3& cov3d,
+                    float fx,
+                    float fy,
+                    float cx,
+                    float cy,
+                    int width,
+                    int height,
+                    const Mat2& v_cov2d,
+                    const float* v_mean2d,
+                    Vec3& v_mean3d,
+                    Mat3& v_cov3d) {
+  const float x = mean3d.v[0];
+  const float y = mean3d.v[1];
+  const float z = mean3d.v[2];
+  const float tan_fovx = 0.5f * static_cast<float>(width) / fx;
+  const float tan_fovy = 0.5f * static_cast<float>(height) / fy;
+  const float lim_x_pos = (static_cast<float>(width) - cx) / fx + 0.3f * tan_fovx;
+  const float lim_x_neg = cx / fx + 0.3f * tan_fovx;
+  const float lim_y_pos = (static_cast<float>(height) - cy) / fy + 0.3f * tan_fovy;
+  const float lim_y_neg = cy / fy + 0.3f * tan_fovy;
+  const float rz = 1.0f / z;
+  const float rz2 = rz * rz;
+  const float rz3 = rz2 * rz;
+  const float x_rz = x * rz;
+  const float y_rz = y * rz;
+  const float tx = z * std::min(lim_x_pos, std::max(-lim_x_neg, x_rz));
+  const float ty = z * std::min(lim_y_pos, std::max(-lim_y_neg, y_rz));
+
+  const float J[6] = {
+      fx * rz, 0.0f, -fx * tx * rz2,
+      0.0f, fy * rz, -fy * ty * rz2,
+  };
+
+  for (int a = 0; a < 3; ++a) {
+    for (int b = 0; b < 3; ++b) {
+      for (int r = 0; r < 2; ++r) {
+        for (int c = 0; c < 2; ++c) {
+          v_cov3d.v[a * 3 + b] +=
+              J[r * 3 + a] * v_cov2d.v[r * 2 + c] * J[c * 3 + b];
+        }
+      }
+    }
+  }
+
+  v_mean3d.v[0] += fx * rz * v_mean2d[0];
+  v_mean3d.v[1] += fy * rz * v_mean2d[1];
+  v_mean3d.v[2] +=
+      -(fx * x * v_mean2d[0] + fy * y * v_mean2d[1]) * rz2;
+
+  float v_J[6] = {};
+  for (int r = 0; r < 2; ++r) {
+    for (int a = 0; a < 3; ++a) {
+      float left = 0.0f;
+      float right = 0.0f;
+      for (int c = 0; c < 2; ++c) {
+        for (int b = 0; b < 3; ++b) {
+          left += v_cov2d.v[r * 2 + c] * J[c * 3 + b] * cov3d.v[a * 3 + b];
+          right += v_cov2d.v[c * 2 + r] * J[c * 3 + b] * cov3d.v[b * 3 + a];
+        }
+      }
+      v_J[r * 3 + a] = left + right;
+    }
+  }
+
+  if (x_rz <= lim_x_pos && x_rz >= -lim_x_neg) {
+    v_mean3d.v[0] += -fx * rz2 * v_J[2];
+  } else {
+    v_mean3d.v[2] += -fx * rz3 * tx * v_J[2];
+  }
+  if (y_rz <= lim_y_pos && y_rz >= -lim_y_neg) {
+    v_mean3d.v[1] += -fy * rz2 * v_J[5];
+  } else {
+    v_mean3d.v[2] += -fy * rz3 * ty * v_J[5];
+  }
+  v_mean3d.v[2] += -fx * rz2 * v_J[0] - fy * rz2 * v_J[4] +
+                   2.0f * fx * tx * rz3 * v_J[2] +
+                   2.0f * fy * ty * rz3 * v_J[5];
+}
+
+void pos_w2c_vjp(const Mat3& R,
+                 const Vec3& mean_w,
+                 const Vec3& v_mean_c,
+                 Mat3& v_R,
+                 Vec3& v_t,
+                 Vec3& v_mean_w) {
+  for (int row = 0; row < 3; ++row) {
+    v_t.v[row] += v_mean_c.v[row];
+    for (int col = 0; col < 3; ++col) {
+      v_R.v[row * 3 + col] += v_mean_c.v[row] * mean_w.v[col];
+    }
+  }
+  Vec3 v_mean = mat3_transpose_vec_mul(R, v_mean_c);
+  for (int i = 0; i < 3; ++i) {
+    v_mean_w.v[i] += v_mean.v[i];
+  }
+}
+
+void covar_w2c_vjp(const Mat3& R,
+                   const Mat3& covar_w,
+                   const Mat3& v_covar_c,
+                   Mat3& v_R,
+                   Mat3& v_covar_w) {
+  Mat3 term1 = matmul(matmul(v_covar_c, R), transpose(covar_w));
+  Mat3 term2 = matmul(matmul(transpose(v_covar_c), R), covar_w);
+  Mat3 covar_grad = matmul(matmul(transpose(R), v_covar_c), R);
+  for (int i = 0; i < 9; ++i) {
+    v_R.v[i] += term1.v[i] + term2.v[i];
+    v_covar_w.v[i] += covar_grad.v[i];
+  }
+}
+
+void quat_to_rotmat_vjp(const float* quat, const Mat3& v_R, float* v_quat) {
+  float w = quat[0];
+  float x = quat[1];
+  float y = quat[2];
+  float z = quat[3];
+  const float inv_norm = 1.0f / std::sqrt(w * w + x * x + y * y + z * z);
+  w *= inv_norm;
+  x *= inv_norm;
+  y *= inv_norm;
+  z *= inv_norm;
+
+  const float* g = v_R.v;
+  float v_quat_n[4] = {
+      2.0f * (x * (g[7] - g[5]) + y * (g[2] - g[6]) +
+              z * (g[3] - g[1])),
+      2.0f * (-2.0f * x * (g[4] + g[8]) + y * (g[1] + g[3]) +
+              z * (g[2] + g[6]) + w * (g[7] - g[5])),
+      2.0f * (x * (g[1] + g[3]) - 2.0f * y * (g[0] + g[8]) +
+              z * (g[5] + g[7]) + w * (g[2] - g[6])),
+      2.0f * (x * (g[2] + g[6]) + y * (g[5] + g[7]) -
+              2.0f * z * (g[0] + g[4]) + w * (g[3] - g[1])),
+  };
+  const float quat_n[4] = {w, x, y, z};
+  float dot = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    dot += v_quat_n[i] * quat_n[i];
+  }
+  for (int i = 0; i < 4; ++i) {
+    v_quat[i] += (v_quat_n[i] - dot * quat_n[i]) * inv_norm;
+  }
+}
+
+void quat_scale_to_covar_vjp(const float* quat,
+                             const float* scale,
+                             const Mat3& v_covar,
+                             float* v_quat,
+                             float* v_scale) {
+  Mat3 R = quat_to_rotmat(quat);
+  Mat3 M = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      M.v[row * 3 + col] = R.v[row * 3 + col] * scale[col];
+    }
+  }
+  Mat3 v_M = matmul(Mat3{{
+                       v_covar.v[0] + v_covar.v[0],
+                       v_covar.v[1] + v_covar.v[3],
+                       v_covar.v[2] + v_covar.v[6],
+                       v_covar.v[3] + v_covar.v[1],
+                       v_covar.v[4] + v_covar.v[4],
+                       v_covar.v[5] + v_covar.v[7],
+                       v_covar.v[6] + v_covar.v[2],
+                       v_covar.v[7] + v_covar.v[5],
+                       v_covar.v[8] + v_covar.v[8],
+                   }},
+                   M);
+  Mat3 v_R = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      v_R.v[row * 3 + col] = v_M.v[row * 3 + col] * scale[col];
+      v_scale[col] += v_M.v[row * 3 + col] * R.v[row * 3 + col];
+    }
+  }
+  quat_to_rotmat_vjp(quat, v_R, v_quat);
 }
 
 ProjectionEval projection_eval_one(const float* mean_w,
@@ -479,7 +719,7 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
     const std::vector<mx::array>&,
     std::vector<mx::array>&) {
   throw std::runtime_error(
-      "GSPlatProjectionEWA3DGSFusedBackward GPU finite-difference path is not implemented yet.");
+      "GSPlatProjectionEWA3DGSFusedBackward GPU path is not implemented yet.");
 }
 #else
 void GSPlatProjectionEWA3DGSFused::eval_gpu(
@@ -516,6 +756,7 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_cpu(
   const auto& viewmats = inputs[4];
   const auto& Ks = inputs[5];
   const auto& radii = inputs[6];
+  const auto& conics = inputs[7];
   const auto& compensations = inputs[8];
   const auto& v_means2d = inputs[9];
   const auto& v_depths = inputs[10];
@@ -541,6 +782,7 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_cpu(
   const float* viewmats_data = viewmats.data<float>();
   const float* Ks_data = Ks.data<float>();
   const int32_t* radii_data = radii.data<int32_t>();
+  const float* conics_data = conics.data<float>();
   const float* v_means2d_data = v_means2d.data<float>();
   const float* v_depths_data = v_depths.data<float>();
   const float* v_conics_data = v_conics.data<float>();
@@ -557,8 +799,6 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_cpu(
   float* v_viewmats_data = viewmats_requires_grad_
                                ? outputs[kProjectionVViewmats].data<float>()
                                : nullptr;
-  constexpr float eps = 1.0e-3f;
-
   for (int b = 0; b < B; ++b) {
     for (int c = 0; c < C; ++c) {
       for (int n = 0; n < N; ++n) {
@@ -572,118 +812,91 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_cpu(
         const int k_off = b * C * 9 + c * 9;
         const float* v_mean2d = v_means2d_data + idx * 2;
         const float* v_conic = v_conics_data + idx * 3;
-        const float* v_comp =
-            v_compensations_data == nullptr ? nullptr : v_compensations_data + idx;
-
-        auto loss = [&](const float* mean,
-                        const float* covar,
-                        const float* quat,
-                        const float* scale,
-                        const float* viewmat) {
-          return projection_loss_one(
-              projection_eval_one(mean, covar, quat, scale, viewmat,
-                                  Ks_data + k_off, params_),
-              v_mean2d, v_depths_data[idx], v_conic, v_comp);
-        };
-
-        for (int axis = 0; axis < 3; ++axis) {
-          float plus_mean[3] = {means_data[mean_off],
-                                means_data[mean_off + 1],
-                                means_data[mean_off + 2]};
-          float minus_mean[3] = {plus_mean[0], plus_mean[1], plus_mean[2]};
-          plus_mean[axis] += eps;
-          minus_mean[axis] -= eps;
-          v_means_data[mean_off + axis] +=
-              (loss(plus_mean,
-                    covars_data == nullptr ? nullptr : covars_data + gaussian_off * 6,
-                    quats_data == nullptr ? nullptr : quats_data + gaussian_off * 4,
-                    scales_data == nullptr ? nullptr : scales_data + gaussian_off * 3,
-                    viewmats_data + view_off) -
-               loss(minus_mean,
-                    covars_data == nullptr ? nullptr : covars_data + gaussian_off * 6,
-                    quats_data == nullptr ? nullptr : quats_data + gaussian_off * 4,
-                    scales_data == nullptr ? nullptr : scales_data + gaussian_off * 3,
-                    viewmats_data + view_off)) /
-              (2.0f * eps);
+        const float* view = viewmats_data + view_off;
+        const float* K = Ks_data + k_off;
+        Mat2 covar2d_inv = Mat2{{
+            conics_data[idx * 3],
+            conics_data[idx * 3 + 1],
+            conics_data[idx * 3 + 1],
+            conics_data[idx * 3 + 2],
+        }};
+        Mat2 v_covar2d_inv = Mat2{{
+            v_conic[0],
+            0.5f * v_conic[1],
+            0.5f * v_conic[1],
+            v_conic[2],
+        }};
+        Mat2 v_covar2d =
+            mat2_scale(mat2_mul(mat2_mul(covar2d_inv, v_covar2d_inv),
+                                covar2d_inv),
+                       -1.0f);
+        if (v_compensations_data != nullptr) {
+          add_blur_vjp(params_.eps2d, covar2d_inv, compensations.data<float>()[idx],
+                       v_compensations_data[idx], v_covar2d);
         }
 
+        Mat3 R = Mat3{{
+            view[0], view[1], view[2],
+            view[4], view[5], view[6],
+            view[8], view[9], view[10],
+        }};
+        Vec3 mean_w = Vec3{{
+            means_data[mean_off],
+            means_data[mean_off + 1],
+            means_data[mean_off + 2],
+        }};
+        Vec3 t = Vec3{{view[3], view[7], view[11]}};
+        Vec3 mean_c = mat3_vec_mul(R, mean_w);
+        for (int i = 0; i < 3; ++i) {
+          mean_c.v[i] += t.v[i];
+        }
+
+        Mat3 covar_w =
+            params_.use_covars
+                ? read_covar(covars_data + gaussian_off * 6)
+                : covar_from_quat_scale(quats_data + gaussian_off * 4,
+                                        scales_data + gaussian_off * 3);
+        Mat3 covar_c = matmul(matmul(R, covar_w), transpose(R));
+
+        Vec3 v_mean_c = Vec3{{0.0f, 0.0f, v_depths_data[idx]}};
+        Mat3 v_covar_c = {};
+        persp_proj_vjp(mean_c, covar_c, K[0], K[4], K[2], K[5],
+                       params_.image_width, params_.image_height, v_covar2d,
+                       v_mean2d, v_mean_c, v_covar_c);
+
+        Vec3 v_mean_w = {};
+        Vec3 v_t = {};
+        Mat3 v_R = {};
+        Mat3 v_covar_w = {};
+        pos_w2c_vjp(R, mean_w, v_mean_c, v_R, v_t, v_mean_w);
+        covar_w2c_vjp(R, covar_w, v_covar_c, v_R, v_covar_w);
+
+        for (int axis = 0; axis < 3; ++axis) {
+          v_means_data[mean_off + axis] += v_mean_w.v[axis];
+        }
         if (params_.use_covars) {
           const int cov_off = gaussian_off * 6;
-          for (int axis = 0; axis < 6; ++axis) {
-            float plus_covar[6];
-            float minus_covar[6];
-            for (int i = 0; i < 6; ++i) {
-              plus_covar[i] = covars_data[cov_off + i];
-              minus_covar[i] = covars_data[cov_off + i];
-            }
-            plus_covar[axis] += eps;
-            minus_covar[axis] -= eps;
-            v_covars_data[cov_off + axis] +=
-                (loss(means_data + mean_off, plus_covar, nullptr, nullptr,
-                      viewmats_data + view_off) -
-                 loss(means_data + mean_off, minus_covar, nullptr, nullptr,
-                      viewmats_data + view_off)) /
-                (2.0f * eps);
-          }
+          v_covars_data[cov_off] += v_covar_w.v[0];
+          v_covars_data[cov_off + 1] += v_covar_w.v[1] + v_covar_w.v[3];
+          v_covars_data[cov_off + 2] += v_covar_w.v[2] + v_covar_w.v[6];
+          v_covars_data[cov_off + 3] += v_covar_w.v[4];
+          v_covars_data[cov_off + 4] += v_covar_w.v[5] + v_covar_w.v[7];
+          v_covars_data[cov_off + 5] += v_covar_w.v[8];
         } else {
           const int quat_off = gaussian_off * 4;
           const int scale_off = gaussian_off * 3;
-          for (int axis = 0; axis < 4; ++axis) {
-            float plus_quat[4];
-            float minus_quat[4];
-            for (int i = 0; i < 4; ++i) {
-              plus_quat[i] = quats_data[quat_off + i];
-              minus_quat[i] = quats_data[quat_off + i];
-            }
-            plus_quat[axis] += eps;
-            minus_quat[axis] -= eps;
-            v_quats_data[quat_off + axis] +=
-                (loss(means_data + mean_off, nullptr, plus_quat,
-                      scales_data + scale_off, viewmats_data + view_off) -
-                 loss(means_data + mean_off, nullptr, minus_quat,
-                      scales_data + scale_off, viewmats_data + view_off)) /
-                (2.0f * eps);
-          }
-          for (int axis = 0; axis < 3; ++axis) {
-            float plus_scale[3];
-            float minus_scale[3];
-            for (int i = 0; i < 3; ++i) {
-              plus_scale[i] = scales_data[scale_off + i];
-              minus_scale[i] = scales_data[scale_off + i];
-            }
-            plus_scale[axis] += eps;
-            minus_scale[axis] -= eps;
-            v_scales_data[scale_off + axis] +=
-                (loss(means_data + mean_off, nullptr, quats_data + quat_off,
-                      plus_scale, viewmats_data + view_off) -
-                 loss(means_data + mean_off, nullptr, quats_data + quat_off,
-                      minus_scale, viewmats_data + view_off)) /
-                (2.0f * eps);
-          }
+          quat_scale_to_covar_vjp(
+              quats_data + quat_off, scales_data + scale_off, v_covar_w,
+              v_quats_data + quat_off, v_scales_data + scale_off);
         }
 
         if (v_viewmats_data != nullptr) {
-          for (int axis = 0; axis < 12; ++axis) {
-            float plus_view[16];
-            float minus_view[16];
-            for (int i = 0; i < 16; ++i) {
-              plus_view[i] = viewmats_data[view_off + i];
-              minus_view[i] = viewmats_data[view_off + i];
+          for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+              v_viewmats_data[view_off + row * 4 + col] +=
+                  v_R.v[row * 3 + col];
             }
-            plus_view[axis] += eps;
-            minus_view[axis] -= eps;
-            v_viewmats_data[view_off + axis] +=
-                (loss(means_data + mean_off,
-                      covars_data == nullptr ? nullptr : covars_data + gaussian_off * 6,
-                      quats_data == nullptr ? nullptr : quats_data + gaussian_off * 4,
-                      scales_data == nullptr ? nullptr : scales_data + gaussian_off * 3,
-                      plus_view) -
-                 loss(means_data + mean_off,
-                      covars_data == nullptr ? nullptr : covars_data + gaussian_off * 6,
-                      quats_data == nullptr ? nullptr : quats_data + gaussian_off * 4,
-                      scales_data == nullptr ? nullptr : scales_data + gaussian_off * 3,
-                      minus_view)) /
-                (2.0f * eps);
+            v_viewmats_data[view_off + row * 4 + 3] += v_t.v[row];
           }
         }
       }

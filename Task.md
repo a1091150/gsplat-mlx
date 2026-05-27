@@ -634,6 +634,7 @@
 - [x] Task 6.6: Projection EWA 3DGS fused explicit backward.
 - [x] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
 - [x] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
+- [x] Task 6.9: Projection EWA 3DGS analytic backward.
 
 ## Validation Plan
 - Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
@@ -735,7 +736,8 @@
 - [x] Add CUDA export script `scripts/export_ref/export_projection_ewa_3dgs_fused_backward.py`.
 - [x] Extend exported `.npz` compare support for `projection_ewa_3dgs_fused_backward.npz`.
 - [x] Validate exported CUDA fixture `refs/projection_ewa_3dgs_fused_backward.npz`.
-- [ ] Replace first-version finite-difference VJP with CUDA-style analytic VJP.
+- [x] Replace first-version finite-difference VJP with CUDA-style analytic VJP for dense pinhole covars path.
+- [x] Add analytic quats/scales covariance-to-parameter VJP for projection backward.
 - [ ] Add Metal projection backward kernel after analytic VJP is locked.
 - [ ] Add packed projection backward support if packed training path becomes in scope.
 
@@ -743,7 +745,7 @@
 - [x] Wire `GSPlatSphericalHarmonics::vjp(...)` to `gsplat_spherical_harmonics_backward(...)`.
 - [x] Wire `GSPlatQuatScaleToCovarPreci::vjp(...)` to `gsplat_quat_scale_to_covar_preci_backward(...)`.
 - [x] Wire `GSPlatRasterizeToPixels3DGS::vjp(...)` to `gsplat_rasterize_to_pixels_3dgs_backward(...)`.
-- [x] Keep projection forward `vjp(...)` unimplemented until projection backward moves from first-pass finite-difference to analytic/Metal path.
+- [x] Keep projection forward `vjp(...)` unimplemented until projection backward is ready for full training.
 - [x] Add `scripts/test/autograd_vjp_smoke.py` for `mx.value_and_grad(..., argnums=...)` smoke coverage.
 - [x] Validate C++/Xcode smoke with `make codex-xcode-test`.
 - [x] Validate installed Python extension with `make pip-install`.
@@ -759,3 +761,14 @@
 - [x] Validate `viewspace_points` gradient shape and nonzero values.
 - [x] Validate proxy gradient matches the direct `means2d` gradient for the additive proxy path.
 - [x] Add `make codex-training-smoke`.
+
+## Task 6.9 - Projection EWA 3DGS Analytic Backward
+- [x] Replace CPU finite-difference projection VJP for dense pinhole covars path.
+- [x] Add closed-form VJP pieces for inverse conic, antialiasing compensation, perspective projection, world-to-camera position, and covariance transform.
+- [x] Add analytic quats/scales covariance-to-parameter VJP.
+- [x] Preserve explicit Python API `projection_ewa_3dgs_fused_backward(...)`.
+- [x] Keep projection forward `vjp(...)` unimplemented until the projection backward contract is ready for full training.
+- [x] Validate `refs/projection_ewa_3dgs_fused_backward.npz` against CUDA reference.
+- [x] Confirm full exported `.npz` parity remains green.
+- [ ] Add Metal projection backward kernel.
+- [ ] Add packed projection backward support if packed training path becomes in scope.
