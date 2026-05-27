@@ -787,11 +787,9 @@
 - [x] Extend `scripts/test/autograd_vjp_smoke.py` with projection `value_and_grad` smoke.
 - [x] Add `scripts/test/training_projection_viewspace_proxy_smoke.py` for projection -> rasterize -> viewspace proxy smoke.
 - [x] Update `make codex-training-smoke` to run both viewspace proxy smoke scripts.
-- [ ] Known limitation: without a projection backward Metal path, projection
-  `vjp(...)` currently crosses from GPU forward outputs into a CPU backward
-  primitive. This cross-device autograd graph can produce zero `v_means` /
-  `v_covars` when the `vjp(...)` layer does not force materialization. Avoid
-  treating this as the final training path.
+- [x] Dense covars + pinhole projection `vjp(...)` now routes to the same-stream
+  Metal backward path. Unsupported projection VJP cases remain CPU/reference or
+  out of scope and should not be treated as full-GPU training coverage.
 
 ## Task 6.11 - Projection Backward Full GPU Path Plan And Scaffold
 - [x] Add `note/projection_backward_gpu_path.md`.
@@ -824,3 +822,14 @@
   `viewspace_points` gradients.
 - [x] Validate dense training smoke without adding extra `mx::eval(...)` inside
   projection `vjp(...)`.
+
+## Task 6.13 - Projection Backward Unsupported Path Guardrails
+- [x] Add `scripts/test/projection_vjp_guardrails.py`.
+- [x] Add `make codex-projection-guardrails`.
+- [x] Verify the supported full-GPU projection VJP boundary:
+  dense covars, pinhole camera, no `v_viewmats`, and nonzero `v_means`,
+  `v_covars`, and `viewspace_points` gradients.
+- [x] Report unsupported or fallback projection VJP cases explicitly:
+  quat/scale projection backward, `v_viewmats`, packed projection,
+  non-pinhole cameras, `Ks`, opacities, and distortion paths.
+- [x] Keep unsupported fallback diagnostics separate from full-GPU acceptance.

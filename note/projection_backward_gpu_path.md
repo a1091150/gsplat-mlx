@@ -96,6 +96,45 @@ Unsupported projection training requests still have two imperfect choices:
    - Should be treated as a temporary workaround, not the final design.
 ```
 
+## Support matrix
+
+Full GPU projection VJP currently means:
+
+```text
+projection forward GPU
+  -> projection vjp(...)
+  -> projection backward GPU on stream()
+```
+
+Supported:
+
+```text
+dense covars input
+pinhole camera_model = 0
+calc_compensations = true/false
+v_means
+v_covars
+viewspace_points gradient proxy
+```
+
+Fallback or not implemented:
+
+```text
+quat/scale projection VJP
+v_viewmats
+non-pinhole cameras
+packed projection
+Ks gradients
+opacity gradients
+external distortion paths
+```
+
+Use `scripts/test/projection_vjp_guardrails.py` or
+`make codex-projection-guardrails` to verify the supported boundary and print
+the expected limitations. This diagnostic may check that a reference fallback
+still has the expected shape, but fallback success must not be interpreted as
+full-GPU coverage.
+
 ## Recommended implementation slice
 
 Start with dense pinhole covars path only:
