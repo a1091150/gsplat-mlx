@@ -689,5 +689,5 @@
 - [x] Add C++/Metal smoke for degree 4 with masks.
 - [x] Add CUDA export script `scripts/export_ref/export_spherical_harmonics_backward.py`.
 - [x] Extend exported `.npz` compare support for `spherical_harmonics_backward.npz`.
-- [x] Keep CUDA fixture optional until exported from a CUDA machine.
+- [x] Validate exported CUDA fixture `refs/spherical_harmonics_backward.npz`.
 - [ ] Replace first-version finite-difference `v_dirs` with CUDA-style analytic VJP if tighter parity is required.

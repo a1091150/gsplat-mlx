@@ -35,14 +35,26 @@ def main() -> None:
     )
     compute_v_dirs = True
 
-    v_coeffs, v_dirs = gsplat._make_lazy_cuda_func("spherical_harmonics_bwd")(
-        degrees_to_use,
-        dirs,
-        coeffs,
-        masks,
-        v_colors.contiguous(),
-        compute_v_dirs,
-    )
+    spherical_harmonics_bwd = gsplat._make_lazy_cuda_func("spherical_harmonics_bwd")
+    try:
+        v_coeffs, v_dirs = spherical_harmonics_bwd(
+            degrees_to_use,
+            coeffs.shape[-2],
+            dirs,
+            coeffs,
+            masks,
+            v_colors.contiguous(),
+            compute_v_dirs,
+        )
+    except TypeError:
+        v_coeffs, v_dirs = spherical_harmonics_bwd(
+            degrees_to_use,
+            dirs,
+            coeffs,
+            masks,
+            v_colors.contiguous(),
+            compute_v_dirs,
+        )
 
     save_npz(
         args.out,
