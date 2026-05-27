@@ -1270,6 +1270,8 @@
   capacity.
 - [x] Add first optimizer learning-rate schedule for `means` / positions,
   including Makefile controls and training summary diagnostics.
+- [x] Add held-out frame evaluation diagnostics with optional
+  `compare_eval_frame_*.png` outputs and train/eval loss gap summaries.
 - [ ] Add optimizer learning-rate schedules for SH/features, opacity, scales,
   and quats. Current non-position optimizers still use fixed Adam learning
   rates.

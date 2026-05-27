@@ -51,6 +51,9 @@ SCANNER_POINTS_TRAIN_HEIGHT ?= 512
 SCANNER_POINTS_TRAIN_MAX_POINTS ?= 50000
 SCANNER_POINTS_TRAIN_FRAMES ?= 3
 SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
+SCANNER_POINTS_EVAL_FRAMES ?= 0
+SCANNER_POINTS_EVAL_FRAME_STEP ?= $(SCANNER_POINTS_TRAIN_FRAME_STEP)
+SCANNER_POINTS_EVAL_START_INDEX ?=
 SCANNER_POINTS_TRAIN_STEPS ?= 200
 SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
 SCANNER_POINTS_TRAIN_LR_MEANS ?= 0.002
@@ -98,6 +101,12 @@ ifneq ($(strip $(SCANNER_POINTS_TRAIN_LR_MEANS_MAX_STEPS)),)
 SCANNER_POINTS_MEANS_LR_FLAGS += --lr-means-max-steps $(SCANNER_POINTS_TRAIN_LR_MEANS_MAX_STEPS)
 endif
 
+SCANNER_POINTS_EVAL_FLAGS = --eval-max-frames $(SCANNER_POINTS_EVAL_FRAMES)
+SCANNER_POINTS_EVAL_FLAGS += --eval-frame-step $(SCANNER_POINTS_EVAL_FRAME_STEP)
+ifneq ($(strip $(SCANNER_POINTS_EVAL_START_INDEX)),)
+SCANNER_POINTS_EVAL_FLAGS += --eval-start-index $(SCANNER_POINTS_EVAL_START_INDEX)
+endif
+
 SCANNER_POINTS_REFINE_FLAGS =
 ifeq ($(SCANNER_POINTS_REFINE_ENABLED),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-enabled
@@ -141,6 +150,7 @@ help:
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
+	@printf "    Optional: SCANNER_POINTS_EVAL_FRAMES/FRAME_STEP/START_INDEX enable held-out eval compares.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_LR_MEANS_FINAL/DELAY_MULT/MAX_STEPS configure means LR decay.\n"
 	@printf "    Optional: SCANNER_POINTS_REFINE_ENABLED=1 plus SCANNER_POINTS_REFINE_* thresholds enable gsplat-style refinement.\n"
@@ -275,6 +285,7 @@ codex-scanner-points-train-spz:
 		--height $(SCANNER_POINTS_TRAIN_HEIGHT) \
 		--max-frames $(SCANNER_POINTS_TRAIN_FRAMES) \
 		--frame-step $(SCANNER_POINTS_TRAIN_FRAME_STEP) \
+		$(SCANNER_POINTS_EVAL_FLAGS) \
 		--max-points $(SCANNER_POINTS_TRAIN_MAX_POINTS) \
 		--steps $(SCANNER_POINTS_TRAIN_STEPS) \
 		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE) \

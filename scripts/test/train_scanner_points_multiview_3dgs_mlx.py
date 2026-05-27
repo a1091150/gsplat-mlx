@@ -875,6 +875,21 @@ def evaluate_sh_frames(
     return stats
 
 
+def evaluate_current_frames(
+    model: Tiny3DGSModel | ScannerPointsSHModel,
+    cameras,
+    targets: list[mx.array],
+    width: int,
+    height: int,
+    tile_size: int,
+    color_mode: str,
+    sh_degree: int,
+) -> list[dict]:
+    if color_mode == "rgb":
+        return evaluate_rgb_frames(model, cameras, targets, width, height, tile_size)
+    return evaluate_sh_frames(model, cameras, targets, width, height, tile_size, sh_degree)
+
+
 def quat_wxyz_to_rotmat(quats: np.ndarray) -> np.ndarray:
     q = quats / np.clip(np.linalg.norm(quats, axis=1, keepdims=True), 1.0e-8, None)
     w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
@@ -1054,6 +1069,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=3)
     parser.add_argument("--frame-step", type=int, default=1)
     parser.add_argument("--start-index", type=int, default=0)
+    parser.add_argument("--eval-max-frames", type=int, default=0)
+    parser.add_argument("--eval-frame-step", type=int, default=None)
+    parser.add_argument("--eval-start-index", type=int, default=None)
     parser.add_argument("--max-points", type=int, default=50000)
     parser.add_argument("--num-random-gaussians", type=int, default=0)
     parser.add_argument("--random-gaussian-bounds-scale", type=float, default=1.05)
@@ -1128,6 +1146,11 @@ def main() -> None:
         raise ValueError("--num-random-gaussians must be nonnegative")
     if args.random_gaussian_bounds_scale <= 0.0:
         raise ValueError("--random-gaussian-bounds-scale must be positive")
+    if args.eval_max_frames < 0:
+        raise ValueError("--eval-max-frames must be nonnegative")
+    eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
+    if eval_frame_step <= 0:
+        raise ValueError("--eval-frame-step must be positive")
     if args.refine_every <= 0:
         raise ValueError("--refine-every must be positive")
     if args.refine_reset_every <= 0:
@@ -1166,10 +1189,17 @@ def main() -> None:
     )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     frames = collect_frames(args.data, args.max_frames, args.frame_step, args.start_index)
+    eval_start_index = args.eval_start_index if args.eval_start_index is not None else frames[-1].index + 1
     cameras = [load_camera(frame, args.width, args.height) for frame in frames]
     targets = [
         mx.array(load_target(camera.image_path, args.width, args.height)[None, ...], dtype=mx.float32)
         for camera in cameras
+    ]
+    eval_frames = collect_frames(args.data, args.eval_max_frames, eval_frame_step, eval_start_index) if args.eval_max_frames > 0 else []
+    eval_cameras = [load_camera(frame, args.width, args.height) for frame in eval_frames]
+    eval_targets = [
+        mx.array(load_target(camera.image_path, args.width, args.height)[None, ...], dtype=mx.float32)
+        for camera in eval_cameras
     ]
     points, colors, raw_point_count = prepare_points(args.data, args.max_points, args.seed)
     points, colors = append_random_gaussians(
@@ -1185,18 +1215,26 @@ def main() -> None:
         model = init_sh_model_from_points(points, colors, args.point_scale, args.opacity, args.max_sh_degree)
     strategy = ScannerDefaultStrategyRuntime(strategy_config, initial_gaussians=model.means.shape[1])
 
-    if args.color_mode == "rgb":
-        initial_stats = evaluate_rgb_frames(model, cameras, targets, args.width, args.height, args.tile_size)
-    else:
-        initial_stats = evaluate_sh_frames(
-            model,
-            cameras,
-            targets,
-            args.width,
-            args.height,
-            args.tile_size,
-            initial_active_sh_degree,
-        )
+    initial_stats = evaluate_current_frames(
+        model,
+        cameras,
+        targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.color_mode,
+        initial_active_sh_degree,
+    )
+    eval_initial_stats = evaluate_current_frames(
+        model,
+        eval_cameras,
+        eval_targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.color_mode,
+        initial_active_sh_degree,
+    ) if eval_cameras else []
     initial_mean_loss = mean_loss(initial_stats)
     active_sh_degree = initial_active_sh_degree
     sh_degree_events = (
@@ -1373,24 +1411,39 @@ def main() -> None:
                 f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
 
-    if args.color_mode == "rgb":
-        final_stats = evaluate_rgb_frames(model, cameras, targets, args.width, args.height, args.tile_size)
-    else:
-        final_stats = evaluate_sh_frames(
-            model,
-            cameras,
-            targets,
-            args.width,
-            args.height,
-            args.tile_size,
-            active_sh_degree,
-        )
+    final_stats = evaluate_current_frames(
+        model,
+        cameras,
+        targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.color_mode,
+        active_sh_degree,
+    )
+    eval_final_stats = evaluate_current_frames(
+        model,
+        eval_cameras,
+        eval_targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.color_mode,
+        active_sh_degree,
+    ) if eval_cameras else []
     final_mean_loss = mean_loss(final_stats)
     target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
     for initial, final, target_image in zip(initial_stats, final_stats, target_images, strict=True):
         frame_index = final["frame_index"]
         write_png(
             args.out_dir / f"compare_frame_{frame_index:05d}.png",
+            image_to_u8(concat_compare(target_image, initial["image"], final["image"])),
+        )
+    eval_target_images = [np.asarray(target[0], dtype=np.float32) for target in eval_targets]
+    for initial, final, target_image in zip(eval_initial_stats, eval_final_stats, eval_target_images, strict=True):
+        frame_index = final["frame_index"]
+        write_png(
+            args.out_dir / f"compare_eval_frame_{frame_index:05d}.png",
             image_to_u8(concat_compare(target_image, initial["image"], final["image"])),
         )
 
@@ -1428,6 +1481,33 @@ def main() -> None:
                 "final_intersections": int(final["intersections"]),
             }
         )
+    eval_frame_summaries = []
+    for initial, final in zip(eval_initial_stats, eval_final_stats, strict=True):
+        eval_frame_summaries.append(
+            {
+                "frame_index": int(final["frame_index"]),
+                "initial_loss": float(initial["loss"]),
+                "final_loss": float(final["loss"]),
+                "initial_psnr": float(initial["psnr"]),
+                "final_psnr": float(final["psnr"]),
+                "initial_visible_gaussians": int(initial["visible_gaussians"]),
+                "final_visible_gaussians": int(final["visible_gaussians"]),
+                "initial_intersections": int(initial["intersections"]),
+                "final_intersections": int(final["intersections"]),
+            }
+        )
+    eval_initial_mean_loss = mean_loss(eval_initial_stats) if eval_initial_stats else None
+    eval_final_mean_loss = mean_loss(eval_final_stats) if eval_final_stats else None
+    eval_final_mean_psnr = (
+        float(np.mean([item["final_psnr"] for item in eval_frame_summaries]))
+        if eval_frame_summaries
+        else None
+    )
+    train_eval_loss_gap = (
+        float(eval_final_mean_loss - final_mean_loss)
+        if eval_final_mean_loss is not None
+        else None
+    )
     preview_diagnostics = {
         "loss_delta": float(final_mean_loss - initial_mean_loss),
         "loss_ratio": float(final_mean_loss / initial_mean_loss) if initial_mean_loss != 0.0 else None,
@@ -1436,6 +1516,8 @@ def main() -> None:
         "final_visible_gaussians_total": int(sum(item["final_visible_gaussians"] for item in frame_summaries)),
         "initial_intersections_total": int(sum(item["initial_intersections"] for item in frame_summaries)),
         "final_intersections_total": int(sum(item["final_intersections"] for item in frame_summaries)),
+        "eval_final_mean_loss": eval_final_mean_loss,
+        "train_eval_loss_gap": train_eval_loss_gap,
         "refinement_operation_totals": refinement_summary["operation_totals"],
         "refinement_latest_event": refinement_summary["latest_event"],
         "final_opacity": final_opacity_diagnostics,
@@ -1451,10 +1533,13 @@ def main() -> None:
         "random_gaussians": args.num_random_gaussians,
         "random_gaussian_bounds_scale": args.random_gaussian_bounds_scale,
         "frames": len(cameras),
+        "eval_frames": len(eval_cameras),
+        "eval_start_index": eval_start_index if eval_cameras else None,
+        "eval_frame_step": eval_frame_step if eval_cameras else None,
         "steps": args.steps,
         "loss_function": "mlx.nn.losses.l1_loss",
         "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
-        "image_outputs": "compare_frame_*.png only by default",
+        "image_outputs": "compare_frame_*.png and optional compare_eval_frame_*.png",
         "learning_rate_schedule": {
             "means": {
                 "initial": float(args.lr_means),
@@ -1494,6 +1579,15 @@ def main() -> None:
         "max_sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(args.max_sh_degree),
         "final_opacity_diagnostics": final_opacity_diagnostics,
         "preview_diagnostics": preview_diagnostics,
+        "eval_diagnostics": {
+            "enabled": bool(eval_cameras),
+            "initial_mean_loss": eval_initial_mean_loss,
+            "final_mean_loss": eval_final_mean_loss,
+            "final_mean_psnr": eval_final_mean_psnr,
+            "train_eval_loss_gap": train_eval_loss_gap,
+            "final_visible_gaussians_total": int(sum(item["final_visible_gaussians"] for item in eval_frame_summaries)),
+            "final_intersections_total": int(sum(item["final_intersections"] for item in eval_frame_summaries)),
+        },
         "spz_color_convention": (
             "colors stores clipped RGB values; sh is empty"
             if args.color_mode == "rgb"
@@ -1501,6 +1595,7 @@ def main() -> None:
         ),
         "refinement_strategy": refinement_summary,
         "frame_summaries": frame_summaries,
+        "eval_frame_summaries": eval_frame_summaries,
     }
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     out_spz.with_suffix(".json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
