@@ -747,12 +747,51 @@ std::vector<mx::array> GSPlatRasterizeToPixels3DGS::jvp(
 }
 
 std::vector<mx::array> GSPlatRasterizeToPixels3DGS::vjp(
-    const std::vector<mx::array>&,
-    const std::vector<mx::array>&,
-    const std::vector<int>&,
-    const std::vector<mx::array>&) {
-  throw std::runtime_error(
-      "GSPlatRasterizeToPixels3DGS vjp is not implemented.");
+    const std::vector<mx::array>& primals,
+    const std::vector<mx::array>& cotangents,
+    const std::vector<int>& argnums,
+    const std::vector<mx::array>& outputs) {
+  if (cotangents.size() < 2 || outputs.size() < 3) {
+    throw std::runtime_error(
+        "GSPlatRasterizeToPixels3DGS vjp expects render color and alpha cotangents.");
+  }
+  RasterizeToPixels3DGSBackwardInput input = {
+      .means2d = primals[0],
+      .conics = primals[1],
+      .colors = primals[2],
+      .opacities = primals[3],
+      .backgrounds = primals[4],
+      .masks = primals[5],
+      .tile_offsets = primals[6],
+      .flatten_ids = primals[7],
+      .render_alphas = outputs[kRenderAlphas],
+      .last_ids = outputs[kLastIds],
+      .v_render_colors = cotangents[kRenderColors],
+      .v_render_alphas = cotangents[kRenderAlphas],
+      .s = stream(),
+      .params = params_,
+      .absgrad = false,
+  };
+  auto backward_outputs = gsplat_rasterize_to_pixels_3dgs_backward(input);
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      vjps.push_back(backward_outputs[kRasterVMeans2D]);
+    } else if (argnum == 1) {
+      vjps.push_back(backward_outputs[kRasterVConics]);
+    } else if (argnum == 2) {
+      vjps.push_back(backward_outputs[kRasterVColors]);
+    } else if (argnum == 3) {
+      vjps.push_back(backward_outputs[kRasterVOpacities]);
+    } else if (argnum == 4 && params_.use_backgrounds) {
+      vjps.push_back(backward_outputs[kRasterVBackgrounds]);
+    } else {
+      throw std::runtime_error(
+          "GSPlatRasterizeToPixels3DGS vjp only supports means2d, conics, colors, opacities, and backgrounds.");
+    }
+  }
+  return vjps;
 }
 
 std::pair<std::vector<mx::array>, std::vector<int>>

@@ -454,11 +454,36 @@ std::vector<mx::array> GSPlatQuatScaleToCovarPreci::jvp(
 }
 
 std::vector<mx::array> GSPlatQuatScaleToCovarPreci::vjp(
-    const std::vector<mx::array>&,
-    const std::vector<mx::array>&,
-    const std::vector<int>&,
+    const std::vector<mx::array>& primals,
+    const std::vector<mx::array>& cotangents,
+    const std::vector<int>& argnums,
     const std::vector<mx::array>&) {
-  throw std::runtime_error("GSPlatQuatScaleToCovarPreci vjp is not implemented.");
+  QuatScaleToCovarPreciBackwardInput input = {
+      .quats = primals[0],
+      .scales = primals[1],
+      .v_covars =
+          compute_covar_ ? cotangents[kCovars] : mx::zeros({0}, mx::float32),
+      .v_precis =
+          compute_preci_ ? cotangents[kPrecis] : mx::zeros({0}, mx::float32),
+      .s = stream(),
+      .triu = triu_,
+      .use_v_covars = compute_covar_,
+      .use_v_precis = compute_preci_,
+  };
+  auto backward_outputs = gsplat_quat_scale_to_covar_preci_backward(input);
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      vjps.push_back(backward_outputs[kVQuats]);
+    } else if (argnum == 1) {
+      vjps.push_back(backward_outputs[kVScales]);
+    } else {
+      throw std::runtime_error(
+          "GSPlatQuatScaleToCovarPreci vjp only supports quats and scales.");
+    }
+  }
+  return vjps;
 }
 
 std::pair<std::vector<mx::array>, std::vector<int>>

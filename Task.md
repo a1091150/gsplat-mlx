@@ -632,7 +632,7 @@
 - [x] Task 6.4: Quat/scale covariance/precision explicit backward.
 - [x] Task 6.5: Rasterize to pixels 3DGS explicit backward.
 - [x] Task 6.6: Projection EWA 3DGS fused explicit backward.
-- [ ] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
+- [x] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
 - [ ] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 
 ## Validation Plan
@@ -738,3 +738,14 @@
 - [ ] Replace first-version finite-difference VJP with CUDA-style analytic VJP.
 - [ ] Add Metal projection backward kernel after analytic VJP is locked.
 - [ ] Add packed projection backward support if packed training path becomes in scope.
+
+## Task 6.7 - Wire MLX Primitive `vjp(...)` For Stable Backward Ops
+- [x] Wire `GSPlatSphericalHarmonics::vjp(...)` to `gsplat_spherical_harmonics_backward(...)`.
+- [x] Wire `GSPlatQuatScaleToCovarPreci::vjp(...)` to `gsplat_quat_scale_to_covar_preci_backward(...)`.
+- [x] Wire `GSPlatRasterizeToPixels3DGS::vjp(...)` to `gsplat_rasterize_to_pixels_3dgs_backward(...)`.
+- [x] Keep projection forward `vjp(...)` unimplemented until projection backward moves from first-pass finite-difference to analytic/Metal path.
+- [x] Add `scripts/test/autograd_vjp_smoke.py` for `mx.value_and_grad(..., argnums=...)` smoke coverage.
+- [x] Validate C++/Xcode smoke with `make codex-xcode-test`.
+- [x] Validate installed Python extension with `make pip-install`.
+- [x] Validate Python autograd smoke with `conda run -n fastgs_core python scripts/test/autograd_vjp_smoke.py`.
+- [x] Confirm exported `.npz` parity remains green.

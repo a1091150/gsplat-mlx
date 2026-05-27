@@ -2,6 +2,7 @@
 
 #include "include/helper.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -543,11 +544,40 @@ std::vector<mx::array> GSPlatSphericalHarmonics::jvp(
 }
 
 std::vector<mx::array> GSPlatSphericalHarmonics::vjp(
-    const std::vector<mx::array>&,
-    const std::vector<mx::array>&,
-    const std::vector<int>&,
-    const std::vector<mx::array>&) {
-  throw std::runtime_error("GSPlatSphericalHarmonics vjp is not implemented.");
+    const std::vector<mx::array>& primals,
+    const std::vector<mx::array>& cotangents,
+    const std::vector<int>& argnums,
+  const std::vector<mx::array>&) {
+  if (cotangents.empty()) {
+    throw std::runtime_error(
+        "GSPlatSphericalHarmonics vjp expects one cotangent.");
+  }
+  const bool compute_v_dirs =
+      std::find(argnums.begin(), argnums.end(), 0) != argnums.end();
+  SphericalHarmonicsBackwardInput input = {
+      .degrees_to_use = degrees_to_use_,
+      .dirs = primals[0],
+      .coeffs = primals[1],
+      .masks = primals[2],
+      .v_colors = cotangents[0],
+      .s = stream(),
+      .use_masks = use_masks_,
+      .compute_v_dirs = compute_v_dirs,
+  };
+  auto backward_outputs = gsplat_spherical_harmonics_backward(input);
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      vjps.push_back(backward_outputs[kSHVDirs]);
+    } else if (argnum == 1) {
+      vjps.push_back(backward_outputs[kSHVCoeffs]);
+    } else {
+      throw std::runtime_error(
+          "GSPlatSphericalHarmonics vjp only supports dirs and coeffs.");
+    }
+  }
+  return vjps;
 }
 
 std::pair<std::vector<mx::array>, std::vector<int>>
