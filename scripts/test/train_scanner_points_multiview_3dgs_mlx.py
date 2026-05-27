@@ -172,6 +172,16 @@ class ScannerDefaultStrategyRuntime:
         if self.radii is not None:
             self.radii = np.concatenate([self.radii, np.zeros((pad,), dtype=np.float32)])
 
+    def reset_running_state(self, gaussian_count: int | None = None) -> None:
+        if gaussian_count is None:
+            gaussian_count = self.grad2d.shape[0]
+        gaussian_count = int(gaussian_count)
+        self.grad2d = np.zeros((gaussian_count,), dtype=np.float32)
+        self.count = np.zeros((gaussian_count,), dtype=np.float32)
+        if self.radii is not None:
+            self.radii = np.zeros((gaussian_count,), dtype=np.float32)
+        self.last_grad2d_stats = self._grad2d_stats()
+
     def update_state(
         self,
         d_viewspace: mx.array,
@@ -564,6 +574,10 @@ class ScannerDefaultStrategyRuntime:
         self.totals["n_opacity_reset"] += n_opacity_reset
         after_count = int(model.means.shape[1])
         self.last_gaussians = after_count
+        grad2d_stats_before_reset = self._grad2d_stats()
+        stats_reset_after_refine = bool(scheduled_refine)
+        if stats_reset_after_refine:
+            self.reset_running_state(after_count)
         self.events.append(
             {
                 "step": int(step),
@@ -576,8 +590,11 @@ class ScannerDefaultStrategyRuntime:
                 "n_prune": n_prune,
                 "prune_breakdown": prune_breakdown,
                 "n_opacity_reset": n_opacity_reset,
+                "stats_reset_after_refine": stats_reset_after_refine,
+                "grad2d_stats_before_reset": grad2d_stats_before_reset,
+                "grad2d_stats_after_reset": self.last_grad2d_stats,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "clone_split_scale_prune_reset_task_6_28i",
+                "status": "clone_split_scale_prune_reset_task_6_30a",
             }
         )
 
@@ -591,7 +608,7 @@ class ScannerDefaultStrategyRuntime:
             )
         )
         return {
-            "implementation_phase": "task_6_28i_scale_prune",
+            "implementation_phase": "task_6_30a_refine_state_reset",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
@@ -624,7 +641,7 @@ class ScannerDefaultStrategyRuntime:
             },
             "opacity_reset_target": self.opacity_reset_target(),
             "opacity_reset_target_logit": self.opacity_reset_target_logit(),
-            "topology_changes": "clone_split_opacity_scale_prune_reset_task_6_28i",
+            "topology_changes": "clone_split_opacity_scale_prune_reset_task_6_30a",
         }
 
 

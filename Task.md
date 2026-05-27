@@ -1254,7 +1254,7 @@
   loss function in `training_summary.json`.
 
 ### Remaining After-Training Strategy Alignment
-- [ ] Align scanner trainer refine-state reset with gsplat `DefaultStrategy`:
+- [x] Align scanner trainer refine-state reset with gsplat `DefaultStrategy`:
   after grow/prune/refine steps, clear or rebuild running `grad2d`, `count`,
   and optional `radii` stats so stale gradients do not drive later topology
   changes.
@@ -1326,7 +1326,7 @@
   performance features.
 
 ### Priority Order
-- [ ] Task 6.30A: Refine-state reset parity with gsplat `DefaultStrategy`.
+- [x] Task 6.30A: Refine-state reset parity with gsplat `DefaultStrategy`.
   After clone/split/prune/reset, clear or rebuild `grad2d`, `count`, and
   `radii` running stats instead of carrying stale pre-refine statistics into
   later steps.
