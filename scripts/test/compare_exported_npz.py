@@ -13,6 +13,7 @@ from gsplat_core import (
     intersect_offset_forward,
     intersect_tile_forward,
     projection_ewa_3dgs_fused_forward,
+    quat_scale_to_covar_preci_backward,
     quat_scale_to_covar_preci_forward,
     rasterize_to_pixels_3dgs_forward,
     spherical_harmonics_backward,
@@ -192,6 +193,25 @@ def compare_quat_scale(data: np.lib.npyio.NpzFile) -> list[bool]:
     return results
 
 
+def compare_quat_scale_backward(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "quats": mx_array(data, "input__quats"),
+        "scales": mx_array(data, "input__scales"),
+    }
+    cotangents = {}
+    if "cotangent__v_covars" in data.files:
+        cotangents["v_covars"] = mx_array(data, "cotangent__v_covars")
+    if "cotangent__v_precis" in data.files:
+        cotangents["v_precis"] = mx_array(data, "cotangent__v_precis")
+    triu = bool(scalar(data, "input__triu")) if "input__triu" in data.files else True
+    actual = quat_scale_to_covar_preci_backward(inputs, cotangents, triu=triu)
+    mx.eval(*actual.values())
+    return [
+        compare_array("v_quats", ref(data, "v_quats"), mx_to_numpy(actual["v_quats"]), atol=3.0e-3, rtol=3.0e-3),
+        compare_array("v_scales", ref(data, "v_scales"), mx_to_numpy(actual["v_scales"]), atol=3.0e-3, rtol=3.0e-3),
+    ]
+
+
 def compare_chain(data: np.lib.npyio.NpzFile) -> list[bool]:
     projection = projection_ewa_3dgs_fused_forward(
         {
@@ -268,6 +288,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "forward_3dgs_chain.npz": compare_chain,
     "intersect_tile_forward.npz": compare_intersect,
     "projection_ewa_3dgs_fused_forward.npz": compare_projection,
+    "quat_scale_to_covar_preci_backward.npz": compare_quat_scale_backward,
     "quat_scale_to_covar_preci_forward.npz": compare_quat_scale,
     "rasterize_to_pixels_3dgs_forward.npz": compare_rasterize,
     "spherical_harmonics_backward.npz": compare_spherical_harmonics_backward,

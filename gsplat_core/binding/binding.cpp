@@ -282,6 +282,33 @@ nb::dict quat_scale_to_covar_preci_forward(
   return result;
 }
 
+nb::dict quat_scale_to_covar_preci_backward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    const std::unordered_map<std::string, mx::array>& cotangents,
+    bool triu) {
+  const auto& quats = require_key(inputs, "quats");
+  const auto& scales = require_key(inputs, "scales");
+  mx::array v_covars = get_or_empty(cotangents, "v_covars");
+  mx::array v_precis = get_or_empty(cotangents, "v_precis");
+
+  gsplat_core::QuatScaleToCovarPreciBackwardInput input = {
+      .quats = quats,
+      .scales = scales,
+      .v_covars = v_covars,
+      .v_precis = v_precis,
+      .s = mx::Device::gpu,
+      .triu = triu,
+      .use_v_covars = v_covars.size() != 0,
+      .use_v_precis = v_precis.size() != 0,
+  };
+
+  auto outputs = gsplat_core::gsplat_quat_scale_to_covar_preci_backward(input);
+  nb::dict result;
+  result["v_quats"] = outputs[gsplat_core::kVQuats];
+  result["v_scales"] = outputs[gsplat_core::kVScales];
+  return result;
+}
+
 }  // namespace
 
 NB_MODULE(_gsplat_core, m) {
@@ -343,5 +370,11 @@ NB_MODULE(_gsplat_core, m) {
       "inputs"_a,
       "compute_covar"_a = true,
       "compute_preci"_a = true,
+      "triu"_a = true);
+  m.def(
+      "quat_scale_to_covar_preci_backward",
+      &quat_scale_to_covar_preci_backward,
+      "inputs"_a,
+      "cotangents"_a,
       "triu"_a = true);
 }

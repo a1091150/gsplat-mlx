@@ -1543,6 +1543,146 @@ void test_quat_scale_to_covar_preci_gpu_full_precision_only() {
   std::cout << "quat_scale_to_covar_preci GPU full precision-only smoke ok\n";
 }
 
+void test_quat_scale_to_covar_preci_backward_reference() {
+  mx::array quats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       0.9238795f, 0.3826834f, 0.0f, 0.0f},
+      {2, 4},
+      mx::float32);
+  mx::array scales(
+      {2.0f, 3.0f, 4.0f,
+       0.5f, 1.5f, 2.5f},
+      {2, 3},
+      mx::float32);
+  mx::array v_covars(
+      {0.1f, 0.0f, 0.0f, 0.2f, 0.0f, 0.3f,
+       -0.2f, 0.05f, 0.1f, 0.4f, -0.15f, 0.25f},
+      {2, 6},
+      mx::float32);
+  mx::array v_precis(
+      {0.4f, 0.0f, 0.0f, 0.5f, 0.0f, 0.6f,
+       0.3f, -0.25f, 0.35f, -0.1f, 0.2f, 0.45f},
+      {2, 6},
+      mx::float32);
+
+  gsplat_core::QuatScaleToCovarPreciBackwardInput input = {
+      .quats = quats,
+      .scales = scales,
+      .v_covars = v_covars,
+      .v_precis = v_precis,
+      .s = mx::Device::cpu,
+      .triu = true,
+      .use_v_covars = true,
+      .use_v_precis = true,
+  };
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_backward(input);
+  expect(outputs.size() == 2, "quat backward output count mismatch");
+  expect_shape(outputs[gsplat_core::kVQuats], {2, 4}, "quat backward v_quats");
+  expect_shape(outputs[gsplat_core::kVScales], {2, 3},
+               "quat backward v_scales");
+  mx::eval(outputs);
+
+  const float* v_quats = outputs[gsplat_core::kVQuats].data<float>();
+  const float* v_scales = outputs[gsplat_core::kVScales].data<float>();
+  const float expected_scales0[3] = {
+      0.3f,
+      1.2f - (1.0f / 27.0f),
+      2.4f - 0.01875f,
+  };
+  for (int i = 0; i < 3; ++i) {
+    expect_close(v_scales[i], expected_scales0[i], 3.0e-3f,
+                 "quat backward identity v_scales");
+  }
+  for (int i = 0; i < 4; ++i) {
+    expect_close(v_quats[i], 0.0f, 3.0e-3f,
+                 "quat backward identity v_quats");
+  }
+
+  gsplat_core::QuatScaleToCovarPreciBackwardInput zero_input = input;
+  zero_input.v_covars = mx::zeros({0}, mx::float32, mx::Device::cpu);
+  zero_input.v_precis = mx::zeros({0}, mx::float32, mx::Device::cpu);
+  zero_input.use_v_covars = false;
+  zero_input.use_v_precis = false;
+  std::vector<mx::array> zero_outputs =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_backward(zero_input);
+  mx::eval(zero_outputs);
+  const float* zero_quats = zero_outputs[gsplat_core::kVQuats].data<float>();
+  const float* zero_scales = zero_outputs[gsplat_core::kVScales].data<float>();
+  for (int i = 0; i < 8; ++i) {
+    expect_close(zero_quats[i], 0.0f, 1.0e-7f,
+                 "quat backward zero v_quats");
+  }
+  for (int i = 0; i < 6; ++i) {
+    expect_close(zero_scales[i], 0.0f, 1.0e-7f,
+                 "quat backward zero v_scales");
+  }
+
+  std::cout << "quat_scale_to_covar_preci backward reference smoke ok\n";
+}
+
+void test_quat_scale_to_covar_preci_backward_gpu_reference() {
+  mx::array quats(
+      {0.35f, 0.2f, -0.4f, 0.8f,
+       2.0f, -1.0f, 0.5f, 0.25f,
+       1.0f, 0.0f, 0.0f, 0.0f},
+      {3, 4},
+      mx::float32);
+  mx::array scales(
+      {0.5f, 1.5f, 2.5f,
+       2.0f, 0.75f, 1.25f,
+       0.25f, 3.0f, 4.0f},
+      {3, 3},
+      mx::float32);
+  mx::array v_covars(
+      {0.1f, 0.2f, -0.3f, 0.4f, 0.5f, -0.6f,
+       -0.2f, 0.05f, 0.1f, 0.4f, -0.15f, 0.25f,
+       0.3f, -0.1f, 0.2f, -0.4f, 0.15f, 0.05f},
+      {3, 6},
+      mx::float32);
+  mx::array v_precis(
+      {-0.4f, 0.3f, 0.2f, -0.1f, 0.6f, 0.7f,
+       0.3f, -0.25f, 0.35f, -0.1f, 0.2f, 0.45f,
+       -0.15f, 0.2f, -0.25f, 0.5f, -0.35f, 0.1f},
+      {3, 6},
+      mx::float32);
+
+  gsplat_core::QuatScaleToCovarPreciBackwardInput cpu_input = {
+      .quats = quats,
+      .scales = scales,
+      .v_covars = v_covars,
+      .v_precis = v_precis,
+      .s = mx::Device::cpu,
+      .triu = true,
+      .use_v_covars = true,
+      .use_v_precis = true,
+  };
+  gsplat_core::QuatScaleToCovarPreciBackwardInput gpu_input = cpu_input;
+  gpu_input.s = mx::Device::gpu;
+
+  std::vector<mx::array> expected =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_backward(cpu_input);
+  std::vector<mx::array> actual =
+      gsplat_core::gsplat_quat_scale_to_covar_preci_backward(gpu_input);
+  mx::eval(expected);
+  mx::eval(actual);
+
+  const float* expected_quats = expected[gsplat_core::kVQuats].data<float>();
+  const float* actual_quats = actual[gsplat_core::kVQuats].data<float>();
+  const float* expected_scales = expected[gsplat_core::kVScales].data<float>();
+  const float* actual_scales = actual[gsplat_core::kVScales].data<float>();
+  for (int i = 0; i < 12; ++i) {
+    expect_close(actual_quats[i], expected_quats[i], 1.0e-3f,
+                 "quat backward GPU v_quats");
+  }
+  for (int i = 0; i < 9; ++i) {
+    expect_close(actual_scales[i], expected_scales[i], 1.0e-3f,
+                 "quat backward GPU v_scales");
+  }
+
+  std::cout << "quat_scale_to_covar_preci backward GPU smoke ok\n";
+}
+
 void test_3dgs_forward_chain_smoke() {
   constexpr int image_width = 16;
   constexpr int image_height = 16;
@@ -1732,6 +1872,8 @@ int main() {
     test_quat_scale_to_covar_preci_reference();
     test_quat_scale_to_covar_preci_gpu_reference();
     test_quat_scale_to_covar_preci_gpu_full_precision_only();
+    test_quat_scale_to_covar_preci_backward_reference();
+    test_quat_scale_to_covar_preci_backward_gpu_reference();
     test_3dgs_forward_chain_smoke();
     std::cout << "gsplat_core C++ smoke tests passed\n";
     return 0;

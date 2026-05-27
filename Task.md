@@ -629,7 +629,7 @@
 - [x] Task 6.1: Backward CUDA source map and saved-tensor contract.
 - [x] Task 6.2: Backward API design doc and `.npz` fixture schema.
 - [x] Task 6.3: Spherical harmonics explicit backward.
-- [ ] Task 6.4: Quat/scale covariance/precision explicit backward.
+- [x] Task 6.4: Quat/scale covariance/precision explicit backward.
 - [ ] Task 6.5: Rasterize to pixels 3DGS explicit backward.
 - [ ] Task 6.6: Projection EWA 3DGS fused explicit backward.
 - [ ] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
@@ -691,3 +691,18 @@
 - [x] Extend exported `.npz` compare support for `spherical_harmonics_backward.npz`.
 - [x] Validate exported CUDA fixture `refs/spherical_harmonics_backward.npz`.
 - [ ] Replace first-version finite-difference `v_dirs` with CUDA-style analytic VJP if tighter parity is required.
+
+## Task 6.4 - Quat/Scale Covariance/Precision Explicit Backward
+- [x] Add `QuatScaleToCovarPreciBackwardInput`.
+- [x] Add explicit C++ entry `gsplat_quat_scale_to_covar_preci_backward(...)`.
+- [x] Add `GSPlatQuatScaleToCovarPreciBackward` MLX Primitive.
+- [x] Add Metal kernel `gsplat_quat_scale_to_covar_preci_backward_kernel`.
+- [x] Support optional `v_covars` and `v_precis` cotangents.
+- [x] Support `triu=true` and `triu=false` output layouts.
+- [x] Expose Python binding `quat_scale_to_covar_preci_backward(...)`.
+- [x] Add C++ CPU smoke with identity-quaternion scale-gradient reference.
+- [x] Add C++/Metal smoke comparing GPU backward against CPU backward.
+- [x] Add CUDA export script `scripts/export_ref/export_quat_scale_to_covar_preci_backward.py`.
+- [x] Extend exported `.npz` compare support for `quat_scale_to_covar_preci_backward.npz`.
+- [x] Validate exported CUDA fixture `refs/quat_scale_to_covar_preci_backward.npz`.
+- [ ] Replace first-version finite-difference VJP with CUDA-style analytic VJP if tighter parity or speed is required.
