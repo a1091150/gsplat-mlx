@@ -224,6 +224,12 @@ class ScannerDefaultStrategyRuntime:
     def _take_gaussians(self, array: mx.array, keep: np.ndarray, axis: int) -> mx.array:
         return mx.take(array, mx.array(keep.astype(np.int32), dtype=mx.int32), axis=axis)
 
+    def _select_gaussians(self, array: mx.array, selected: np.ndarray, axis: int) -> mx.array:
+        return mx.take(array, mx.array(selected.astype(np.int32), dtype=mx.int32), axis=axis)
+
+    def _append_gaussians(self, array: mx.array, extra: mx.array, axis: int) -> mx.array:
+        return mx.concatenate([array, extra], axis=axis)
+
     def _apply_keep_to_param_and_optimizer(
         self,
         model: Tiny3DGSModel | ScannerPointsSHModel,
@@ -242,6 +248,72 @@ class ScannerDefaultStrategyRuntime:
         for state_name in ("m", "v"):
             if state_name in param_state:
                 param_state[state_name] = self._take_gaussians(param_state[state_name], keep, axis)
+
+    def _apply_duplicate_to_state(self, selected: np.ndarray) -> None:
+        self.grad2d = np.concatenate([self.grad2d, self.grad2d[selected]])
+        self.count = np.concatenate([self.count, self.count[selected]])
+        if self.radii is not None:
+            self.radii = np.concatenate([self.radii, self.radii[selected]])
+        self.last_grad2d_stats = self._grad2d_stats()
+
+    def _apply_duplicate_to_param_and_optimizer(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        name: str,
+        selected: np.ndarray,
+    ) -> None:
+        if not hasattr(model, name):
+            return
+        axis = GAUSSIAN_AXES[name]
+        param = getattr(model, name)
+        extra = self._select_gaussians(param, selected, axis)
+        setattr(model, name, self._append_gaussians(param, extra, axis))
+
+        optimizer = optimizers.get(name)
+        if optimizer is None or name not in optimizer.state:
+            return
+        param_state = optimizer.state[name]
+        for state_name in ("m", "v"):
+            if state_name not in param_state:
+                continue
+            state_extra = self._select_gaussians(param_state[state_name], selected, axis)
+            param_state[state_name] = self._append_gaussians(
+                param_state[state_name],
+                mx.zeros_like(state_extra),
+                axis,
+            )
+
+    def _duplicate_high_grad_small(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        color_mode: str,
+    ) -> int:
+        visible = self.count > 0.0
+        if not np.any(visible):
+            return 0
+
+        avg_grad2d = np.zeros_like(self.grad2d)
+        avg_grad2d[visible] = self.grad2d[visible] / np.maximum(self.count[visible], 1.0)
+        mx.eval(model.log_scales)
+        scales = np.exp(np.asarray(model.log_scales[0], dtype=np.float32))
+        max_scale = scales.max(axis=-1)
+        small = max_scale <= self.config.grow_scale3d * self.config.scene_scale
+        selected = np.where((avg_grad2d > self.config.grow_grad2d) & small)[0].astype(np.int32)
+        if selected.size == 0:
+            return 0
+
+        names = ["means", "quats", "log_scales", "opacity_logits"]
+        if color_mode == "rgb":
+            names.append("color_logits")
+        else:
+            names.extend(["features_dc", "features_rest"])
+        for name in names:
+            self._apply_duplicate_to_param_and_optimizer(model, optimizers, name, selected)
+        self._apply_duplicate_to_state(selected)
+        mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
+        return int(selected.size)
 
     def _prune_by_opacity(
         self,
@@ -284,7 +356,9 @@ class ScannerDefaultStrategyRuntime:
         scheduled_reset = self.config.should_reset_opacity(step)
         if not scheduled_refine and not scheduled_reset:
             return
+        n_clone = self._duplicate_high_grad_small(model, optimizers, color_mode) if scheduled_refine else 0
         n_prune = self._prune_by_opacity(model, optimizers, color_mode) if scheduled_refine else 0
+        self.totals["n_clone"] += n_clone
         self.totals["n_prune"] += n_prune
         after_count = int(model.means.shape[1])
         self.last_gaussians = after_count
@@ -295,18 +369,18 @@ class ScannerDefaultStrategyRuntime:
                 "scheduled_opacity_reset": bool(scheduled_reset),
                 "num_gaussians_before": int(gaussian_count),
                 "num_gaussians_after": after_count,
-                "n_clone": 0,
+                "n_clone": n_clone,
                 "n_split": 0,
                 "n_prune": n_prune,
                 "n_opacity_reset": 0,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "opacity_prune_task_6_28c",
+                "status": "clone_duplicate_prune_task_6_28d",
             }
         )
 
     def summary(self) -> dict:
         return {
-            "implementation_phase": "task_6_28b_grad2d_accumulation",
+            "implementation_phase": "task_6_28d_clone_duplicate",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
@@ -315,7 +389,7 @@ class ScannerDefaultStrategyRuntime:
             "totals": self.totals,
             "grad2d_accumulation": "dense_viewspace_points_gradient",
             "grad2d_stats": self.last_grad2d_stats,
-            "topology_changes": "opacity_prune_only_task_6_28c",
+            "topology_changes": "clone_duplicate_and_opacity_prune_task_6_28d",
         }
 
 
