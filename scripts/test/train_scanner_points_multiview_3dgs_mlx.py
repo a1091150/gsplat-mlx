@@ -7,21 +7,86 @@ import json
 from pathlib import Path
 
 import mlx.core as mx
+import mlx.nn as nn
 import numpy as np
 from mlx.optimizers import Adam
 
+from gsplat_core import (
+    intersect_offset_forward,
+    intersect_tile_forward,
+    projection_ewa_3dgs_fused_forward,
+    rasterize_to_pixels_3dgs_forward,
+    spherical_harmonics_forward,
+)
 from render_random_3dgs_png import write_png
 from scanner_dataset_random_render_smoke import collect_frames, load_camera, load_target
 from scanner_points_alignment_render import prepare_points
 from train_scanner_random_3dgs_mlx import (
     camera_arrays,
     concat_compare,
-    evaluate_frames,
     mean_loss,
     mx_logit,
     save_frame_targets,
 )
-from train_tiny_3dgs_mlx import Tiny3DGSModel, image_to_u8, normalize_quats, render_model
+from train_tiny_3dgs_mlx import image_to_u8, normalize_quats
+
+
+SH_C0 = 0.28209479177387814
+MAX_SUPPORTED_SH_DEGREE = 3
+
+
+class ScannerPointsSHModel(nn.Module):
+    def __init__(
+        self,
+        means: mx.array,
+        quats: mx.array,
+        log_scales: mx.array,
+        features_dc: mx.array,
+        features_rest: mx.array,
+        opacity_logits: mx.array,
+    ):
+        super().__init__()
+        self.means = means
+        self.quats = quats
+        self.log_scales = log_scales
+        self.features_dc = features_dc
+        self.features_rest = features_rest
+        self.opacity_logits = opacity_logits
+
+    @classmethod
+    def from_arrays(
+        cls,
+        means: mx.array,
+        quats: mx.array,
+        log_scales: mx.array,
+        features_dc: mx.array,
+        features_rest: mx.array,
+        opacity_logits: mx.array,
+    ) -> "ScannerPointsSHModel":
+        return cls(
+            means,
+            quats,
+            log_scales,
+            features_dc,
+            features_rest,
+            opacity_logits,
+        )
+
+    @property
+    def scales(self) -> mx.array:
+        return mx.exp(self.log_scales)
+
+    @property
+    def opacities(self) -> mx.array:
+        return mx.sigmoid(self.opacity_logits)
+
+    @property
+    def normalized_quats(self) -> mx.array:
+        return normalize_quats(self.quats)
+
+
+def sh_coeff_count(degree: int) -> int:
+    return (degree + 1) * (degree + 1)
 
 
 def init_model_from_points(
@@ -29,20 +94,163 @@ def init_model_from_points(
     colors: np.ndarray,
     point_scale: float,
     opacity: float,
-) -> Tiny3DGSModel:
+    max_sh_degree: int,
+) -> ScannerPointsSHModel:
     n = int(points.shape[0])
     means = mx.array(points[None, ...], dtype=mx.float32)
     quats = mx.zeros((1, n, 4), dtype=mx.float32) + mx.array([1.0, 0.0, 0.0, 0.0], dtype=mx.float32)
     log_scales = mx.full((1, n, 3), np.log(point_scale), dtype=mx.float32)
-    color_logits = mx_logit(mx.array(colors[None, None, ...], dtype=mx.float32))
+    features_dc = mx.array(((colors[None, ...] - 0.5) / SH_C0).astype(np.float32), dtype=mx.float32)
+    rest_count = sh_coeff_count(max_sh_degree) - 1
+    features_rest = mx.zeros((1, n, rest_count, 3), dtype=mx.float32)
     opacity_logits = mx_logit(mx.full((1, n), opacity, dtype=mx.float32))
-    return Tiny3DGSModel.from_arrays(
+    return ScannerPointsSHModel.from_arrays(
         means,
         normalize_quats(quats),
         log_scales,
-        color_logits,
+        features_dc,
+        features_rest,
         opacity_logits,
     )
+
+
+def camera_center_from_viewmat(viewmats: mx.array) -> mx.array:
+    rot = viewmats[:, :, :3, :3]
+    trans = viewmats[:, :, :3, 3]
+    return -mx.matmul(mx.swapaxes(rot, -1, -2), trans[..., None])[..., 0]
+
+
+def sh_colors_for_camera(
+    model: ScannerPointsSHModel,
+    viewmats: mx.array,
+    sh_degree: int,
+) -> mx.array:
+    active_coeffs = sh_coeff_count(sh_degree)
+    dirs = model.means[:, None, :, :] - camera_center_from_viewmat(viewmats)[:, :, None, :]
+    dirs = dirs / mx.maximum(mx.sqrt(mx.sum(dirs * dirs, axis=-1, keepdims=True)), 1.0e-8)
+    coeffs = mx.concatenate(
+        [
+            mx.expand_dims(model.features_dc, axis=2),
+            model.features_rest[:, :, : active_coeffs - 1, :],
+        ],
+        axis=2,
+    )
+    coeffs = mx.broadcast_to(coeffs[:, None, :, :, :], (*dirs.shape[:-1], active_coeffs, 3))
+    colors = spherical_harmonics_forward(
+        sh_degree,
+        {
+            "dirs": mx.reshape(dirs, (-1, 3)),
+            "coeffs": mx.reshape(coeffs, (-1, active_coeffs, 3)),
+        },
+    )
+    return mx.clip(mx.reshape(colors + 0.5, (*dirs.shape[:-1], 3)), 0.0, 1.0)
+
+
+def render_sh_model(
+    model: ScannerPointsSHModel,
+    viewspace_points: mx.array,
+    viewmats: mx.array,
+    Ks: mx.array,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+) -> dict[str, mx.array]:
+    tile_width = (width + tile_size - 1) // tile_size
+    tile_height = (height + tile_size - 1) // tile_size
+    projection = projection_ewa_3dgs_fused_forward(
+        {
+            "means": model.means,
+            "quats": model.normalized_quats,
+            "scales": model.scales,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "viewspace_points": viewspace_points,
+        },
+        image_width=width,
+        image_height=height,
+        eps2d=0.3,
+        near_plane=0.01,
+        far_plane=100.0,
+        radius_clip=0.0,
+        calc_compensations=False,
+        camera_model=0,
+    )
+    intersections = intersect_tile_forward(
+        {
+            "means2d": projection["means2d"],
+            "radii": projection["radii"],
+            "depths": projection["depths"],
+        },
+        I=1,
+        tile_size=tile_size,
+        tile_width=tile_width,
+        tile_height=tile_height,
+        sort=True,
+        segmented=False,
+    )
+    tile_offsets = mx.stop_gradient(
+        intersect_offset_forward(
+            intersections["isect_ids"],
+            I=1,
+            tile_width=tile_width,
+            tile_height=tile_height,
+        )
+    )
+    flatten_ids = mx.stop_gradient(intersections["flatten_ids"])
+    render = rasterize_to_pixels_3dgs_forward(
+        {
+            "means2d": projection["means2d"],
+            "conics": projection["conics"],
+            "colors": sh_colors_for_camera(model, viewmats, sh_degree),
+            "opacities": mx.expand_dims(model.opacities, axis=1),
+            "backgrounds": mx.array([[0.025, 0.025, 0.025]], dtype=mx.float32),
+            "tile_offsets": tile_offsets,
+            "flatten_ids": flatten_ids,
+        },
+        image_width=width,
+        image_height=height,
+        tile_size=tile_size,
+    )
+    return {
+        **render,
+        "radii": projection["radii"],
+        "tiles_per_gauss": mx.stop_gradient(intersections["tiles_per_gauss"]),
+        "flatten_ids": flatten_ids,
+    }
+
+
+def evaluate_sh_frames(
+    model: ScannerPointsSHModel,
+    cameras,
+    targets: list[mx.array],
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+) -> list[dict]:
+    stats = []
+    for camera, target in zip(cameras, targets, strict=True):
+        viewmats, Ks = camera_arrays(camera)
+        viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
+        render = render_sh_model(model, viewspace_points, viewmats, Ks, width, height, tile_size, sh_degree)
+        diff = render["render_colors"] - target
+        loss = mx.mean(diff * diff)
+        mx.eval(loss, render["render_colors"], render["radii"], render["flatten_ids"])
+        mse = float(np.asarray(loss))
+        radii = np.asarray(render["radii"])
+        flatten_ids = np.asarray(render["flatten_ids"])
+        stats.append(
+            {
+                "frame_index": int(camera.index),
+                "loss": mse,
+                "psnr": float(-10.0 * np.log10(max(mse, 1.0e-12))),
+                "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
+                "intersections": int(flatten_ids.shape[0]),
+                "image": np.asarray(render["render_colors"][0], dtype=np.float32),
+            }
+        )
+    return stats
 
 
 def quat_wxyz_to_rotmat(quats: np.ndarray) -> np.ndarray:
@@ -118,19 +326,28 @@ def quats_to_spz(quats: np.ndarray) -> np.ndarray:
 
 def export_trained_spz(
     path: Path,
-    model: Tiny3DGSModel,
-    color_mode: str,
+    model: ScannerPointsSHModel,
+    sh_degree: int,
 ) -> int:
     try:
         import spz
     except ImportError as exc:
         raise ImportError("The 'spz' Python package is required for SPZ export.") from exc
 
-    mx.eval(model.means, model.log_scales, model.normalized_quats, model.color_logits, model.opacity_logits)
+    mx.eval(
+        model.means,
+        model.log_scales,
+        model.normalized_quats,
+        model.features_dc,
+        model.features_rest,
+        model.opacity_logits,
+    )
     means = np.asarray(model.means[0], dtype=np.float32)
     log_scales = np.asarray(model.log_scales[0], dtype=np.float32)
     quats = np.asarray(model.normalized_quats[0], dtype=np.float32)
-    colors = np.asarray(model.colors[0, 0], dtype=np.float32)
+    features_dc = np.asarray(model.features_dc[0], dtype=np.float32)
+    active_rest = sh_coeff_count(sh_degree) - 1
+    features_rest = np.asarray(model.features_rest[0, :, :active_rest, :], dtype=np.float32)
     opacity_logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
 
     cloud = spz.GaussianCloud()
@@ -139,15 +356,9 @@ def export_trained_spz(
     cloud.scales = log_scales.reshape(-1).astype(np.float32)
     cloud.rotations = quats_to_spz(quats).reshape(-1).astype(np.float32)
     cloud.alphas = opacity_logits.reshape(-1).astype(np.float32)
-    if color_mode == "rgb":
-        cloud.colors = np.clip(colors, 0.0, 1.0).reshape(-1).astype(np.float32)
-    elif color_mode == "sh0":
-        sh_c0 = 0.28209479177387814
-        cloud.colors = ((np.clip(colors, 0.0, 1.0) - 0.5) / sh_c0).reshape(-1).astype(np.float32)
-    else:
-        raise ValueError(f"Unsupported color mode: {color_mode}")
-    cloud.sh_degree = 0
-    cloud.sh = np.array([], dtype=np.float32)
+    cloud.colors = features_dc.reshape(-1).astype(np.float32)
+    cloud.sh_degree = int(sh_degree)
+    cloud.sh = features_rest.reshape(-1).astype(np.float32)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     opts = spz.PackOptions()
@@ -175,16 +386,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--lr-means", type=float, default=2.0e-3)
     parser.add_argument("--lr-colors", type=float, default=2.0e-2)
+    parser.add_argument("--lr-sh-rest", type=float, default=None)
     parser.add_argument("--lr-opacity", type=float, default=5.0e-3)
     parser.add_argument("--lr-scales", type=float, default=1.0e-3)
     parser.add_argument("--lr-quats", type=float, default=1.0e-3)
     parser.add_argument("--log-interval", type=int, default=20)
-    parser.add_argument("--spz-color-mode", choices=("rgb", "sh0"), default="rgb")
+    parser.add_argument("--sh-degree", type=int, default=0)
+    parser.add_argument("--max-sh-degree", type=int, default=1)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.sh_degree < 0 or args.max_sh_degree < 0:
+        raise ValueError("SH degree values must be nonnegative")
+    if args.sh_degree > args.max_sh_degree:
+        raise ValueError("--sh-degree must be <= --max-sh-degree")
+    if args.max_sh_degree > MAX_SUPPORTED_SH_DEGREE:
+        raise ValueError(f"--max-sh-degree currently supports up to {MAX_SUPPORTED_SH_DEGREE}")
+    lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
     args.out_dir.mkdir(parents=True, exist_ok=True)
     frames = collect_frames(args.data, args.max_frames, args.frame_step, args.start_index)
     cameras = [load_camera(frame, args.width, args.height) for frame in frames]
@@ -193,10 +413,18 @@ def main() -> None:
         for camera in cameras
     ]
     points, colors, raw_point_count = prepare_points(args.data, args.max_points, args.seed)
-    model = init_model_from_points(points, colors, args.point_scale, args.opacity)
+    model = init_model_from_points(points, colors, args.point_scale, args.opacity, args.max_sh_degree)
     save_frame_targets(args.out_dir, cameras, targets)
 
-    initial_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+    initial_stats = evaluate_sh_frames(
+        model,
+        cameras,
+        targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.sh_degree,
+    )
     initial_mean_loss = mean_loss(initial_stats)
     for item in initial_stats:
         write_png(
@@ -208,24 +436,42 @@ def main() -> None:
         means: mx.array,
         quats: mx.array,
         log_scales: mx.array,
-        color_logits: mx.array,
+        features_dc: mx.array,
+        features_rest: mx.array,
         opacity_logits: mx.array,
         viewspace_points: mx.array,
         viewmats: mx.array,
         Ks: mx.array,
         target: mx.array,
     ) -> mx.array:
-        local = Tiny3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
-        render = render_model(local, viewspace_points, viewmats, Ks, args.width, args.height, args.tile_size)
+        local = ScannerPointsSHModel.from_arrays(
+            means,
+            quats,
+            log_scales,
+            features_dc,
+            features_rest,
+            opacity_logits,
+        )
+        render = render_sh_model(
+            local,
+            viewspace_points,
+            viewmats,
+            Ks,
+            args.width,
+            args.height,
+            args.tile_size,
+            args.sh_degree,
+        )
         diff = render["render_colors"] - target
         return mx.mean(diff * diff)
 
-    grad_fn = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4, 5))
+    grad_fn = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
     optimizers = {
         "means": Adam(learning_rate=args.lr_means),
         "quats": Adam(learning_rate=args.lr_quats),
         "log_scales": Adam(learning_rate=args.lr_scales),
-        "color_logits": Adam(learning_rate=args.lr_colors),
+        "features_dc": Adam(learning_rate=args.lr_colors),
+        "features_rest": Adam(learning_rate=lr_sh_rest),
         "opacity_logits": Adam(learning_rate=args.lr_opacity),
     }
 
@@ -242,14 +488,23 @@ def main() -> None:
             model.means,
             model.quats,
             model.log_scales,
-            model.color_logits,
+            model.features_dc,
+            model.features_rest,
             model.opacity_logits,
             viewspace_points,
             viewmats,
             Ks,
             target,
         )
-        d_means, d_quats, d_log_scales, d_color_logits, d_opacity_logits, d_viewspace = grads
+        (
+            d_means,
+            d_quats,
+            d_log_scales,
+            d_features_dc,
+            d_features_rest,
+            d_opacity_logits,
+            d_viewspace,
+        ) = grads
         mx.eval(loss, d_viewspace)
         last_loss = float(np.asarray(loss))
         last_viewspace_grad = d_viewspace
@@ -258,10 +513,18 @@ def main() -> None:
         optimizers["means"].update(model, {"means": d_means})
         optimizers["quats"].update(model, {"quats": d_quats})
         optimizers["log_scales"].update(model, {"log_scales": d_log_scales})
-        optimizers["color_logits"].update(model, {"color_logits": d_color_logits})
+        optimizers["features_dc"].update(model, {"features_dc": d_features_dc})
+        optimizers["features_rest"].update(model, {"features_rest": d_features_rest})
         optimizers["opacity_logits"].update(model, {"opacity_logits": d_opacity_logits})
         model.quats = normalize_quats(model.quats)
-        mx.eval(model.means, model.quats, model.log_scales, model.color_logits, model.opacity_logits)
+        mx.eval(
+            model.means,
+            model.quats,
+            model.log_scales,
+            model.features_dc,
+            model.features_rest,
+            model.opacity_logits,
+        )
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
@@ -269,7 +532,15 @@ def main() -> None:
                 f"loss={last_loss:.8f} viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
 
-    final_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+    final_stats = evaluate_sh_frames(
+        model,
+        cameras,
+        targets,
+        args.width,
+        args.height,
+        args.tile_size,
+        args.sh_degree,
+    )
     final_mean_loss = mean_loss(final_stats)
     target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
     for initial, final, target_image in zip(initial_stats, final_stats, target_images, strict=True):
@@ -291,7 +562,7 @@ def main() -> None:
         raise AssertionError("scanner points multi-view training expected nonzero viewspace_points gradient")
 
     out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanner_points.spz"
-    exported_gaussians = export_trained_spz(out_spz, model, args.spz_color_mode)
+    exported_gaussians = export_trained_spz(out_spz, model, args.sh_degree)
     spz_size = out_spz.stat().st_size
     if spz_size <= 0:
         raise AssertionError(f"SPZ output is empty: {out_spz}")
@@ -329,7 +600,12 @@ def main() -> None:
         "spz_scale_convention": "trained log_scales",
         "spz_opacity_convention": "trained opacity logits",
         "spz_rotation_convention": "trained wxyz quats transformed by scanner axis3",
-        "spz_color_mode": args.spz_color_mode,
+        "color_path": "spherical_harmonics",
+        "sh_degree": args.sh_degree,
+        "max_sh_degree": args.max_sh_degree,
+        "sh_coeff_count": sh_coeff_count(args.sh_degree),
+        "max_sh_coeff_count": sh_coeff_count(args.max_sh_degree),
+        "spz_color_convention": "colors stores SH degree-0 coefficients; sh stores higher-order coefficients",
         "frame_summaries": frame_summaries,
     }
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

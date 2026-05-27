@@ -1094,3 +1094,24 @@
 - [ ] Keep this as a smoke/minimal trainer first; defer densify, split, clone,
   pruning, opacity reset, and full scanner optimizer policy until this path is
   stable.
+
+## Task 6.27 - Scanner Points Trainer SH Degree 0/1 Color Path
+- [x] Replace the scanner points multi-view trainer's RGB color-logit path with
+  SH coefficients split into `features_dc` and `features_rest`.
+- [x] Initialize `features_dc` from `points.ply` RGB using the gsplat/SPZ
+  degree-0 SH convention `(rgb - 0.5) / C0`.
+- [x] Add `--sh-degree` and `--max-sh-degree` so the trainer can run degree 0
+  or degree 1 now while keeping coefficient storage available for higher
+  degrees.
+- [x] Render per-view colors through `spherical_harmonics_forward` using the
+  current camera center and Gaussian-to-camera directions before rasterization.
+- [x] Train `features_dc` and `features_rest` with separate Adam updates while
+  preserving means, quats, log-scales, opacity logits, and the explicit
+  `viewspace_points` gradient proxy.
+- [x] Export trained SPZ files with SH metadata: `cloud.colors` stores degree-0
+  coefficients and `cloud.sh` stores the active higher-order coefficients.
+- [x] Add `SCANNER_POINTS_TRAIN_SH_DEGREE` and
+  `SCANNER_POINTS_TRAIN_MAX_SH_DEGREE` to `make codex-scanner-points-train-spz`.
+- [x] Treat degree 2/3 as supported by the same coefficient path and
+  smoke-test the SPZ exportable higher-degree path; current `spz` package
+  validation rejects degree 4.

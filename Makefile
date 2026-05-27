@@ -53,6 +53,8 @@ SCANNER_POINTS_TRAIN_FRAMES ?= 3
 SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
 SCANNER_POINTS_TRAIN_STEPS ?= 200
 SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
+SCANNER_POINTS_TRAIN_SH_DEGREE ?= 0
+SCANNER_POINTS_TRAIN_MAX_SH_DEGREE ?= 1
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
 .PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
@@ -207,7 +209,9 @@ codex-scanner-points-train-spz:
 		--frame-step $(SCANNER_POINTS_TRAIN_FRAME_STEP) \
 		--max-points $(SCANNER_POINTS_TRAIN_MAX_POINTS) \
 		--steps $(SCANNER_POINTS_TRAIN_STEPS) \
-		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE)
+		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE) \
+		--sh-degree $(SCANNER_POINTS_TRAIN_SH_DEGREE) \
+		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
