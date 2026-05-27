@@ -31,7 +31,7 @@ SCANNER_TRAIN_HEIGHT ?= 512
 SCANNER_TRAIN_N ?= 1024
 SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
-SCANNER_TRAIN_STEPS ?= 40
+SCANNER_TRAIN_STEPS ?= 200
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
 .PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-projection-guardrails clean

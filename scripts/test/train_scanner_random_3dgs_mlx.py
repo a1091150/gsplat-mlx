@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import mlx.core as mx
@@ -85,24 +86,49 @@ def save_frame_renders(
         save_render(out_dir / f"{prefix}_frame_{camera.index:05d}.png", render["render_colors"])
 
 
-def mean_loss(
+def psnr_from_mse(mse: float) -> float:
+    return float(-10.0 * np.log10(max(mse, 1.0e-12)))
+
+
+def concat_compare(target: np.ndarray, initial: np.ndarray, final: np.ndarray) -> np.ndarray:
+    gap = np.ones((target.shape[0], 6, 3), dtype=np.float32)
+    return np.concatenate([target, gap, initial, gap, final], axis=1)
+
+
+def evaluate_frames(
     model: Tiny3DGSModel,
     cameras,
     targets: list[mx.array],
     width: int,
     height: int,
     tile_size: int,
-) -> float:
-    losses = []
+) -> list[dict]:
+    stats = []
     for camera, target in zip(cameras, targets, strict=True):
         viewmats, Ks = camera_arrays(camera)
         viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
         render = render_model(model, viewspace_points, viewmats, Ks, width, height, tile_size)
         diff = render["render_colors"] - target
         loss = mx.mean(diff * diff)
-        mx.eval(loss)
-        losses.append(float(np.asarray(loss)))
-    return float(np.mean(losses))
+        mx.eval(loss, render["render_colors"], render["radii"], render["flatten_ids"])
+        mse = float(np.asarray(loss))
+        radii = np.asarray(render["radii"])
+        flatten_ids = np.asarray(render["flatten_ids"])
+        stats.append(
+            {
+                "frame_index": int(camera.index),
+                "loss": mse,
+                "psnr": psnr_from_mse(mse),
+                "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
+                "intersections": int(flatten_ids.shape[0]),
+                "image": np.asarray(render["render_colors"][0], dtype=np.float32),
+            }
+        )
+    return stats
+
+
+def mean_loss(stats: list[dict]) -> float:
+    return float(np.mean([item["loss"] for item in stats]))
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,9 +170,13 @@ def main() -> None:
         args.seed,
     )
     save_frame_targets(args.out_dir, cameras, targets)
-    save_frame_renders(args.out_dir, "step_0000", model, cameras, args.width, args.height, args.tile_size)
-
-    initial_mean_loss = mean_loss(model, cameras, targets, args.width, args.height, args.tile_size)
+    initial_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+    initial_mean_loss = mean_loss(initial_stats)
+    for item in initial_stats:
+        write_png(
+            args.out_dir / f"step_0000_frame_{item['frame_index']:05d}.png",
+            image_to_u8(item["image"]),
+        )
 
     def loss_fn(
         means: mx.array,
@@ -189,6 +219,7 @@ def main() -> None:
 
     last_loss = None
     last_viewspace_grad = None
+    last_viewspace_grad_norm = None
     for step in range(1, args.steps + 1):
         view_id = (step - 1) % len(cameras)
         camera = cameras[view_id]
@@ -210,6 +241,7 @@ def main() -> None:
         mx.eval(loss, d_viewspace)
         last_loss = float(np.asarray(loss))
         last_viewspace_grad = d_viewspace
+        last_viewspace_grad_norm = float(np.linalg.norm(np.asarray(d_viewspace)))
 
         optimizers["means"].update(model, {"means": d_means})
         optimizers["quats"].update(model, {"quats": d_quats})
@@ -226,18 +258,24 @@ def main() -> None:
         )
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
-            print(f"step={step:04d} frame={camera.index:05d} loss={last_loss:.8f}")
+            print(
+                f"step={step:04d} frame={camera.index:05d} "
+                f"loss={last_loss:.8f} viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
+            )
 
-    final_mean_loss = mean_loss(model, cameras, targets, args.width, args.height, args.tile_size)
-    save_frame_renders(
-        args.out_dir,
-        f"step_{args.steps:04d}",
-        model,
-        cameras,
-        args.width,
-        args.height,
-        args.tile_size,
-    )
+    final_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+    final_mean_loss = mean_loss(final_stats)
+    target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
+    for initial, final, target_image in zip(initial_stats, final_stats, target_images, strict=True):
+        frame_index = final["frame_index"]
+        write_png(
+            args.out_dir / f"step_{args.steps:04d}_frame_{frame_index:05d}.png",
+            image_to_u8(final["image"]),
+        )
+        write_png(
+            args.out_dir / f"compare_frame_{frame_index:05d}.png",
+            image_to_u8(concat_compare(target_image, initial["image"], final["image"])),
+        )
 
     if last_loss is None or not np.isfinite(final_mean_loss):
         raise AssertionError("scanner random training loss should be finite")
@@ -249,10 +287,51 @@ def main() -> None:
     if last_viewspace_grad is None or not np.any(np.abs(np.asarray(last_viewspace_grad)) > 1.0e-8):
         raise AssertionError("scanner random training expected nonzero viewspace_points gradient")
 
+    frame_summaries = []
+    for initial, final in zip(initial_stats, final_stats, strict=True):
+        frame_summaries.append(
+            {
+                "frame_index": int(final["frame_index"]),
+                "initial_loss": float(initial["loss"]),
+                "final_loss": float(final["loss"]),
+                "initial_psnr": float(initial["psnr"]),
+                "final_psnr": float(final["psnr"]),
+                "initial_visible_gaussians": int(initial["visible_gaussians"]),
+                "final_visible_gaussians": int(final["visible_gaussians"]),
+                "initial_intersections": int(initial["intersections"]),
+                "final_intersections": int(final["intersections"]),
+            }
+        )
+    summary = {
+        "dataset": str(args.data),
+        "width": args.width,
+        "height": args.height,
+        "num_gaussians": args.num_gaussians,
+        "frames": len(cameras),
+        "steps": args.steps,
+        "initial_mean_loss": initial_mean_loss,
+        "final_mean_loss": final_mean_loss,
+        "last_viewspace_grad_norm": last_viewspace_grad_norm,
+        "frame_summaries": frame_summaries,
+    }
+    (args.out_dir / "training_summary.json").write_text(
+        json.dumps(summary, indent=2),
+        encoding="utf-8",
+    )
+
+    for item in frame_summaries:
+        print(
+            f"frame={item['frame_index']:05d} "
+            f"loss={item['initial_loss']:.8f}->{item['final_loss']:.8f} "
+            f"psnr={item['initial_psnr']:.2f}->{item['final_psnr']:.2f} "
+            f"visible={item['initial_visible_gaussians']}->{item['final_visible_gaussians']} "
+            f"intersections={item['initial_intersections']}->{item['final_intersections']}"
+        )
     print(
         "scanner random 3dgs mlx training ok "
         f"initial_mean_loss={initial_mean_loss:.8f} "
         f"final_mean_loss={final_mean_loss:.8f} "
+        f"last_viewspace_grad_norm={last_viewspace_grad_norm:.8f} "
         f"frames={len(cameras)} output_dir={args.out_dir}"
     )
 

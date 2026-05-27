@@ -996,3 +996,18 @@
   `viewspace_points` gradient, and non-diverging mean frame loss.
 - [ ] Revisit camera convention and initialization quality before treating this
   as a real scanner training pipeline.
+
+## Task 6.23 - Scanner Training Preview Diagnostics
+- [x] Extend `scripts/test/train_scanner_random_3dgs_mlx.py` with per-frame
+  diagnostic evaluation.
+- [x] Report initial/final loss and PSNR for every selected scanner frame.
+- [x] Report visible Gaussian counts and intersection counts before and after
+  the training smoke.
+- [x] Report the latest `viewspace_points` gradient norm during training.
+- [x] Save side-by-side comparison PNGs per frame:
+  target | initial render | final render.
+- [x] Save `training_summary.json` with run settings, mean losses, latest
+  viewspace gradient norm, and per-frame summaries.
+- [x] Validate diagnostics on a short scanner random training run.
+- [ ] Use these diagnostics to judge camera convention before adding
+  `points.ply` initialization.
