@@ -1017,6 +1017,12 @@ def opacity_diagnostics(model: Tiny3DGSModel | ScannerPointsSHModel) -> dict:
     }
 
 
+def active_sh_degree_for_step(start: int, target: int, interval: int, step: int) -> int:
+    if interval <= 0:
+        return int(target)
+    return int(min(target, start + max(step - 1, 0) // interval))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Downloads/2026_05_04_16_51_29"))
@@ -1045,6 +1051,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--color-mode", choices=("rgb", "sh"), default="rgb")
     parser.add_argument("--sh-degree", type=int, default=0)
     parser.add_argument("--max-sh-degree", type=int, default=1)
+    parser.add_argument("--sh-degree-start", type=int, default=None)
+    parser.add_argument("--sh-degree-target", type=int, default=None)
+    parser.add_argument("--sh-degree-schedule-interval", type=int, default=0)
     parser.add_argument("--refine-enabled", action="store_true")
     parser.add_argument("--refine-prune-opa", type=float, default=0.005)
     parser.add_argument("--refine-grow-grad2d", type=float, default=0.0002)
@@ -1072,6 +1081,26 @@ def main() -> None:
         raise ValueError("--sh-degree must be <= --max-sh-degree")
     if args.max_sh_degree > MAX_SUPPORTED_SH_DEGREE:
         raise ValueError(f"--max-sh-degree currently supports up to {MAX_SUPPORTED_SH_DEGREE}")
+    sh_degree_start = args.sh_degree if args.sh_degree_start is None else args.sh_degree_start
+    sh_degree_target = args.sh_degree if args.sh_degree_target is None else args.sh_degree_target
+    if sh_degree_start < 0 or sh_degree_target < 0:
+        raise ValueError("--sh-degree-start and --sh-degree-target must be nonnegative")
+    if sh_degree_start > sh_degree_target:
+        raise ValueError("--sh-degree-start must be <= --sh-degree-target")
+    if sh_degree_target > args.max_sh_degree:
+        raise ValueError("--sh-degree-target must be <= --max-sh-degree")
+    if args.sh_degree_schedule_interval < 0:
+        raise ValueError("--sh-degree-schedule-interval must be nonnegative")
+    if args.color_mode == "rgb" and (
+        args.sh_degree_start is not None or args.sh_degree_target is not None or args.sh_degree_schedule_interval > 0
+    ):
+        raise ValueError("SH degree schedule arguments require --color-mode sh")
+    initial_active_sh_degree = active_sh_degree_for_step(
+        sh_degree_start,
+        sh_degree_target,
+        args.sh_degree_schedule_interval,
+        1,
+    )
     if args.num_random_gaussians < 0:
         raise ValueError("--num-random-gaussians must be nonnegative")
     if args.random_gaussian_bounds_scale <= 0.0:
@@ -1135,7 +1164,7 @@ def main() -> None:
             args.width,
             args.height,
             args.tile_size,
-            args.sh_degree,
+            initial_active_sh_degree,
         )
     initial_mean_loss = mean_loss(initial_stats)
     for item in initial_stats:
@@ -1143,6 +1172,12 @@ def main() -> None:
             args.out_dir / f"step_0000_frame_{item['frame_index']:05d}.png",
             image_to_u8(item["image"]),
         )
+    active_sh_degree = initial_active_sh_degree
+    sh_degree_events = (
+        [{"step": 1, "active_sh_degree": int(initial_active_sh_degree)}]
+        if args.color_mode == "sh"
+        else []
+    )
 
     def rgb_loss_fn(
         means: mx.array,
@@ -1187,7 +1222,7 @@ def main() -> None:
             args.width,
             args.height,
             args.tile_size,
-            args.sh_degree,
+            active_sh_degree,
         )
         return nn.losses.l1_loss(render["render_colors"], target), render["radii"]
 
@@ -1227,6 +1262,15 @@ def main() -> None:
             )
             d_means, d_quats, d_log_scales, d_color_logits, d_opacity_logits, d_viewspace = grads
         else:
+            next_active_sh_degree = active_sh_degree_for_step(
+                sh_degree_start,
+                sh_degree_target,
+                args.sh_degree_schedule_interval,
+                step,
+            )
+            if next_active_sh_degree != active_sh_degree:
+                active_sh_degree = next_active_sh_degree
+                sh_degree_events.append({"step": int(step), "active_sh_degree": int(active_sh_degree)})
             (loss, strategy_radii), grads = sh_grad_fn(
                 model.means,
                 model.quats,
@@ -1300,7 +1344,7 @@ def main() -> None:
             args.width,
             args.height,
             args.tile_size,
-            args.sh_degree,
+            active_sh_degree,
         )
     final_mean_loss = mean_loss(final_stats)
     target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
@@ -1323,7 +1367,8 @@ def main() -> None:
         raise AssertionError("scanner points multi-view training expected nonzero viewspace_points gradient")
 
     out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanner_points.spz"
-    exported_gaussians = export_trained_spz(out_spz, model, args.color_mode, args.sh_degree)
+    export_sh_degree = active_sh_degree if args.color_mode == "sh" else args.sh_degree
+    exported_gaussians = export_trained_spz(out_spz, model, args.color_mode, export_sh_degree)
     spz_size = out_spz.stat().st_size
     if spz_size <= 0:
         raise AssertionError(f"SPZ output is empty: {out_spz}")
@@ -1383,8 +1428,20 @@ def main() -> None:
         "color_mode": args.color_mode,
         "color_path": "rgb_logits" if args.color_mode == "rgb" else "spherical_harmonics",
         "sh_degree": None if args.color_mode == "rgb" else args.sh_degree,
+        "active_sh_degree_final": None if args.color_mode == "rgb" else active_sh_degree,
+        "export_sh_degree": None if args.color_mode == "rgb" else export_sh_degree,
+        "sh_degree_schedule": None
+        if args.color_mode == "rgb"
+        else {
+            "start": int(sh_degree_start),
+            "target": int(sh_degree_target),
+            "interval": int(args.sh_degree_schedule_interval),
+            "initial_active_degree": int(initial_active_sh_degree),
+            "final_active_degree": int(active_sh_degree),
+            "events": sh_degree_events,
+        },
         "max_sh_degree": None if args.color_mode == "rgb" else args.max_sh_degree,
-        "sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(args.sh_degree),
+        "sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(active_sh_degree),
         "max_sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(args.max_sh_degree),
         "final_opacity_diagnostics": final_opacity_diagnostics,
         "preview_diagnostics": preview_diagnostics,

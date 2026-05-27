@@ -53,9 +53,12 @@ SCANNER_POINTS_TRAIN_FRAMES ?= 3
 SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
 SCANNER_POINTS_TRAIN_STEPS ?= 200
 SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
-SCANNER_POINTS_TRAIN_COLOR_MODE ?= rgb
+SCANNER_POINTS_TRAIN_COLOR_MODE ?= sh
 SCANNER_POINTS_TRAIN_SH_DEGREE ?= 0
-SCANNER_POINTS_TRAIN_MAX_SH_DEGREE ?= 1
+SCANNER_POINTS_TRAIN_MAX_SH_DEGREE ?= 3
+SCANNER_POINTS_TRAIN_SH_DEGREE_START ?= 0
+SCANNER_POINTS_TRAIN_SH_DEGREE_TARGET ?= 3
+SCANNER_POINTS_TRAIN_SH_DEGREE_SCHEDULE_INTERVAL ?= 1000
 SCANNER_POINTS_REFINE_ENABLED ?= 0
 SCANNER_POINTS_REFINE_PRUNE_OPA ?= 0.005
 SCANNER_POINTS_REFINE_GROW_GRAD2D ?= 0.0002
@@ -73,6 +76,14 @@ SCANNER_POINTS_REFINE_SCENE_SCALE ?= 1.0
 SCANNER_POINTS_REFINE_ABSGRAD ?= 0
 SCANNER_POINTS_REFINE_REVISED_OPACITY ?= 0
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
+
+SCANNER_POINTS_SH_SCHEDULE_FLAGS = --sh-degree-schedule-interval $(SCANNER_POINTS_TRAIN_SH_DEGREE_SCHEDULE_INTERVAL)
+ifneq ($(strip $(SCANNER_POINTS_TRAIN_SH_DEGREE_START)),)
+SCANNER_POINTS_SH_SCHEDULE_FLAGS += --sh-degree-start $(SCANNER_POINTS_TRAIN_SH_DEGREE_START)
+endif
+ifneq ($(strip $(SCANNER_POINTS_TRAIN_SH_DEGREE_TARGET)),)
+SCANNER_POINTS_SH_SCHEDULE_FLAGS += --sh-degree-target $(SCANNER_POINTS_TRAIN_SH_DEGREE_TARGET)
+endif
 
 SCANNER_POINTS_REFINE_FLAGS =
 ifeq ($(SCANNER_POINTS_REFINE_ENABLED),1)
@@ -117,6 +128,7 @@ help:
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
+	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
 	@printf "    Optional: SCANNER_POINTS_REFINE_ENABLED=1 plus SCANNER_POINTS_REFINE_* thresholds enable gsplat-style refinement.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
@@ -255,6 +267,7 @@ codex-scanner-points-train-spz:
 		--color-mode $(SCANNER_POINTS_TRAIN_COLOR_MODE) \
 		--sh-degree $(SCANNER_POINTS_TRAIN_SH_DEGREE) \
 		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE) \
+		$(SCANNER_POINTS_SH_SCHEDULE_FLAGS) \
 		$(SCANNER_POINTS_REFINE_FLAGS)
 
 codex-projection-guardrails:

@@ -1265,9 +1265,9 @@
   later task explicitly brings them in.
 
 ### Remaining Training Behavior Alignment
-- [ ] Add progressive SH degree scheduling. Current `--sh-degree` is fixed for
-  the whole run; it does not automatically increase like common 3DGS/gsplat
-  training setups.
+- [x] Add progressive SH degree scheduling so SH training can increase the
+  active degree during the run while keeping `--max-sh-degree` as model
+  capacity.
 - [ ] Add optimizer learning-rate schedules for means, SH/features, opacity,
   scales, and quats. Current trainer uses fixed Adam learning rates.
 - [ ] Decide whether to add an SSIM/DSSIM component or keep the scanner trainer
