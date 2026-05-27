@@ -12,9 +12,15 @@ TINY_TRAIN_STEPS ?= 40
 TINY_TRAIN_N ?= 1024
 TINY_TRAIN_WIDTH ?= 512
 TINY_TRAIN_HEIGHT ?= 512
+TINY_MULTIVIEW_OUT ?= outputs/tiny_3dgs_multiview_train
+TINY_MULTIVIEW_STEPS ?= 40
+TINY_MULTIVIEW_N ?= 1024
+TINY_MULTIVIEW_WIDTH ?= 512
+TINY_MULTIVIEW_HEIGHT ?= 512
+TINY_MULTIVIEW_VIEWS ?= 3
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -27,6 +33,7 @@ help:
 	@printf "  make codex-training-smoke  Run MLX value_and_grad viewspace proxy smoke test.\n"
 	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-tiny-train  Run a tiny MLX nn.Module+Adam 3DGS training example.\n"
+	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -98,6 +105,15 @@ codex-tiny-train:
 		--num-gaussians $(TINY_TRAIN_N) \
 		--width $(TINY_TRAIN_WIDTH) \
 		--height $(TINY_TRAIN_HEIGHT)
+
+codex-tiny-multiview-train:
+	conda run -n $(CONDA_ENV) python scripts/test/train_tiny_multiview_3dgs_mlx.py \
+		--out-dir "$(TINY_MULTIVIEW_OUT)" \
+		--steps $(TINY_MULTIVIEW_STEPS) \
+		--num-gaussians $(TINY_MULTIVIEW_N) \
+		--num-views $(TINY_MULTIVIEW_VIEWS) \
+		--width $(TINY_MULTIVIEW_WIDTH) \
+		--height $(TINY_MULTIVIEW_HEIGHT)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

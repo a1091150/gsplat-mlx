@@ -907,27 +907,30 @@
   generated-image path stays stable.
 
 ## Task 6.19 - Tiny Multi-View Training Smoke
-- [ ] Extend `scripts/test/train_tiny_3dgs_mlx.py` with a small multi-view
-  training mode.
-- [ ] Generate multiple synthetic pinhole cameras that share one Gaussian set
+- [x] Add `scripts/test/train_tiny_multiview_3dgs_mlx.py` as a separate
+  multi-view training script.
+- [x] Generate multiple synthetic pinhole cameras that share one Gaussian set
   but use different `viewmats`, `Ks`, and target images.
-- [ ] Keep the first version dense, single-scene, pinhole-only, and
+- [x] Keep the first version dense, single-scene, pinhole-only, and
   quats/scales-based.
-- [ ] Train by cycling or sampling one view per step while all views update the
+- [x] Generate multi-view targets by rendering a fixed target Gaussian model so
+  the target views are 3D-consistent.
+- [x] Train by cycling one view per step while all views update the
   same `Tiny3DGSModel` parameters.
-- [ ] Keep `viewspace_points` as an explicit dummy trainable proxy argument for
+- [x] Keep `viewspace_points` as an explicit dummy trainable proxy argument for
   each selected view.
-- [ ] Render every view through:
+- [x] Render every view through:
   projection -> intersect tile -> intersect offset -> rasterize.
-- [ ] Continue to stop gradients through discrete `tile_offsets` and
+- [x] Continue to stop gradients through discrete `tile_offsets` and
   `flatten_ids`.
-- [ ] Save target, initial, and final preview PNGs per view, such as
+- [x] Save target, initial, and final preview PNGs per view, such as
   `target_view_00.png`, `step_0000_view_00.png`, and
   `step_0040_view_00.png`.
-- [ ] Add a Makefile entry or variables for multi-view smoke once the script
-  option is stable.
-- [ ] Validate that multi-view loss is finite and does not diverge on a short
+- [x] Add `make codex-tiny-multiview-train` and related Makefile variables.
+- [x] Validate that multi-view loss is finite and does not diverge on a short
   run.
+- [ ] Add external image or dataset-backed multi-view targets after the
+  generated target-model path stays stable.
 
 ## Task 6.20 - Tiny Trainer SPZ Export
 - [ ] Add optional SPZ export after the tiny trainer has a stable single-view
