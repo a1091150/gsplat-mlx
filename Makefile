@@ -39,9 +39,14 @@ SCANNER_ALIGN_FRAMES ?= 3
 SCANNER_ALIGN_FRAME_STEP ?= 1
 SCANNER_ALIGN_MAX_POINTS ?= 50000
 SCANNER_ALIGN_POINT_SCALE ?= 0.01
+SCANNER_SPZ_OUT ?= outputs/scanner_points.spz
+SCANNER_SPZ_MAX_POINTS ?= 50000
+SCANNER_SPZ_POINT_SCALE ?= 0.01
+SCANNER_SPZ_OPACITY ?= 0.65
+SCANNER_SPZ_COLOR_MODE ?= rgb
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -58,6 +63,7 @@ help:
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
+	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -170,6 +176,15 @@ codex-scanner-points-align:
 		--frame-step $(SCANNER_ALIGN_FRAME_STEP) \
 		--max-points $(SCANNER_ALIGN_MAX_POINTS) \
 		--point-scale $(SCANNER_ALIGN_POINT_SCALE)
+
+codex-scanner-points-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/export_scanner_points_spz.py \
+		--data "$(SCANNER_DATASET)" \
+		--out "$(SCANNER_SPZ_OUT)" \
+		--max-points $(SCANNER_SPZ_MAX_POINTS) \
+		--point-scale $(SCANNER_SPZ_POINT_SCALE) \
+		--opacity $(SCANNER_SPZ_OPACITY) \
+		--color-mode $(SCANNER_SPZ_COLOR_MODE)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

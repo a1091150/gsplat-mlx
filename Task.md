@@ -1041,19 +1041,21 @@
   proceeding to training or SPZ export.
 
 ## Task 6.25 - Scanner Scene SPZ Export
-- [ ] Add SPZ export for scanner-scene Gaussians after Task 6.24 verifies
+- [x] Add `scripts/test/export_scanner_points_spz.py`.
+- [x] Add SPZ export for scanner-scene Gaussians after Task 6.24 verifies
   `points.ply` and camera alignment.
-- [ ] Keep this separate from Task 6.24 so render alignment and file export can
+- [x] Keep this separate from Task 6.24 so render alignment and file export can
   be debugged independently.
-- [ ] Detect whether the `spz` Python package is available in the
+- [x] Detect whether the `spz` Python package is available in the
   `fastgs_core` conda environment.
-- [ ] Export scanner-initialized or scanner-trained Gaussian attributes:
-  positions, scales/log-scales according to SPZ convention, normalized
-  quaternions, sigmoid opacities, and colors.
-- [ ] Document coordinate system assumptions, quaternion ordering, scale
+- [x] Export scanner-initialized Gaussian attributes from `points.ply`:
+  positions, log-scales, identity quaternions, logit opacities, and colors.
+- [x] Document coordinate system assumptions, quaternion ordering, scale
   convention, opacity convention, and color/SH convention before treating the
   output as viewer-compatible.
-- [ ] Add a CLI flag and Makefile variable for writing scanner `.spz` output.
-- [ ] Validate that export disabled keeps training/render smoke unchanged.
-- [ ] Validate that export enabled writes a nonempty `.spz` file and reports
+- [x] Add `make codex-scanner-points-spz` and related Makefile variables.
+- [x] Validate that export stays separate from training/render smoke.
+- [x] Validate that export enabled writes a nonempty `.spz` file and reports
   the exported Gaussian count.
+- [ ] Inspect exported `.spz` in the intended viewer and adjust coordinate or
+  color conventions if needed.
