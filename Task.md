@@ -633,7 +633,7 @@
 - [x] Task 6.5: Rasterize to pixels 3DGS explicit backward.
 - [x] Task 6.6: Projection EWA 3DGS fused explicit backward.
 - [x] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
-- [ ] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
+- [x] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 
 ## Validation Plan
 - Add CUDA/Colab export scripts under `scripts/export_ref` for each backward op.
@@ -749,3 +749,13 @@
 - [x] Validate installed Python extension with `make pip-install`.
 - [x] Validate Python autograd smoke with `conda run -n fastgs_core python scripts/test/autograd_vjp_smoke.py`.
 - [x] Confirm exported `.npz` parity remains green.
+
+## Task 6.8 - Dense Training Smoke With `viewspace_points` Gradient Proxy
+- [x] Add `scripts/test/training_viewspace_proxy_smoke.py`.
+- [x] Use rasterize dense forward/backward as the first stable training-gradient path.
+- [x] Keep projection out of this smoke until projection forward `vjp(...)` is backed by analytic/Metal backward.
+- [x] Model the FastGS MLX proxy pattern with `screen_means = means2d + viewspace_points`.
+- [x] Include `viewspace_points` in `mx.value_and_grad(..., argnums=...)`.
+- [x] Validate `viewspace_points` gradient shape and nonzero values.
+- [x] Validate proxy gradient matches the direct `means2d` gradient for the additive proxy path.
+- [x] Add `make codex-training-smoke`.
