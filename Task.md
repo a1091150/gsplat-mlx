@@ -1110,8 +1110,11 @@
   `viewspace_points` gradient proxy.
 - [x] Export trained SPZ files with SH metadata: `cloud.colors` stores degree-0
   coefficients and `cloud.sh` stores the active higher-order coefficients.
-- [x] Add `SCANNER_POINTS_TRAIN_SH_DEGREE` and
-  `SCANNER_POINTS_TRAIN_MAX_SH_DEGREE` to `make codex-scanner-points-train-spz`.
+- [x] Add `--color-mode rgb|sh`, keeping RGB logits available as the default
+  path and using SH coefficients only when `--color-mode sh` is selected.
+- [x] Add `SCANNER_POINTS_TRAIN_COLOR_MODE`,
+  `SCANNER_POINTS_TRAIN_SH_DEGREE`, and `SCANNER_POINTS_TRAIN_MAX_SH_DEGREE`
+  to `make codex-scanner-points-train-spz`.
 - [x] Treat degree 2/3 as supported by the same coefficient path and
   smoke-test the SPZ exportable higher-degree path; current `spz` package
   validation rejects degree 4.
