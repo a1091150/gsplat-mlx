@@ -15,6 +15,7 @@ from gsplat_core import (
     projection_ewa_3dgs_fused_forward,
     quat_scale_to_covar_preci_backward,
     quat_scale_to_covar_preci_forward,
+    rasterize_to_pixels_3dgs_backward,
     rasterize_to_pixels_3dgs_forward,
     spherical_harmonics_backward,
     spherical_harmonics_forward,
@@ -131,6 +132,49 @@ def compare_rasterize(data: np.lib.npyio.NpzFile) -> list[bool]:
         compare_array("render_colors", ref(data, "render_colors"), mx_to_numpy(actual["render_colors"]), atol=1.0e-4, rtol=1.0e-4),
         compare_array("render_alphas", ref(data, "render_alphas"), mx_to_numpy(actual["render_alphas"]), atol=1.0e-4, rtol=1.0e-4),
     ]
+
+
+def compare_rasterize_backward(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "means2d": mx_array(data, "input__means2d"),
+        "conics": mx_array(data, "input__conics"),
+        "colors": mx_array(data, "input__colors"),
+        "opacities": mx_array(data, "input__opacities"),
+        "tile_offsets": mx_array(data, "input__tile_offsets"),
+        "flatten_ids": mx_array(data, "input__flatten_ids"),
+    }
+    if "input__backgrounds" in data.files:
+        inputs["backgrounds"] = mx_array(data, "input__backgrounds")
+    if "input__masks" in data.files:
+        inputs["masks"] = mx_array(data, "input__masks")
+
+    actual = rasterize_to_pixels_3dgs_backward(
+        inputs,
+        {
+            "render_alphas": mx_array(data, "fwd__render_alphas"),
+            "last_ids": mx_array(data, "fwd__last_ids"),
+        },
+        {
+            "v_render_colors": mx_array(data, "cotangent__v_render_colors"),
+            "v_render_alphas": mx_array(data, "cotangent__v_render_alphas"),
+        },
+        image_width=int(scalar(data, "input__image_width")),
+        image_height=int(scalar(data, "input__image_height")),
+        tile_size=int(scalar(data, "input__tile_size")),
+        absgrad=bool(scalar(data, "meta__absgrad")) if "meta__absgrad" in data.files else False,
+    )
+    mx.eval(*actual.values())
+    results = [
+        compare_array("v_means2d", ref(data, "v_means2d"), mx_to_numpy(actual["v_means2d"]), atol=1.0e-4, rtol=1.0e-4),
+        compare_array("v_conics", ref(data, "v_conics"), mx_to_numpy(actual["v_conics"]), atol=1.0e-4, rtol=1.0e-4),
+        compare_array("v_colors", ref(data, "v_colors"), mx_to_numpy(actual["v_colors"]), atol=1.0e-4, rtol=1.0e-4),
+        compare_array("v_opacities", ref(data, "v_opacities"), mx_to_numpy(actual["v_opacities"]), atol=1.0e-4, rtol=1.0e-4),
+    ]
+    if "ref__v_backgrounds" in data.files:
+        results.append(compare_array("v_backgrounds", ref(data, "v_backgrounds"), mx_to_numpy(actual["v_backgrounds"]), atol=1.0e-4, rtol=1.0e-4))
+    if "ref__v_means2d_abs" in data.files:
+        results.append(compare_array("v_means2d_abs", ref(data, "v_means2d_abs"), mx_to_numpy(actual["v_means2d_abs"]), atol=1.0e-4, rtol=1.0e-4))
+    return results
 
 
 def compare_spherical_harmonics(data: np.lib.npyio.NpzFile) -> list[bool]:
@@ -290,6 +334,7 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_forward.npz": compare_projection,
     "quat_scale_to_covar_preci_backward.npz": compare_quat_scale_backward,
     "quat_scale_to_covar_preci_forward.npz": compare_quat_scale,
+    "rasterize_to_pixels_3dgs_backward.npz": compare_rasterize_backward,
     "rasterize_to_pixels_3dgs_forward.npz": compare_rasterize,
     "spherical_harmonics_backward.npz": compare_spherical_harmonics_backward,
     "spherical_harmonics_forward.npz": compare_spherical_harmonics,

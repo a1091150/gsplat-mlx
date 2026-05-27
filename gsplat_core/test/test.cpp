@@ -1053,6 +1053,121 @@ void test_rasterize_to_pixels_3dgs_masks(mx::StreamOrDevice device,
   std::cout << name << " masks smoke ok\n";
 }
 
+void test_rasterize_to_pixels_3dgs_backward_gpu_reference() {
+  mx::array means2d(
+      {0.75f, 0.75f,
+       1.35f, 1.15f},
+      {1, 2, 2},
+      mx::float32);
+  mx::array conics(
+      {0.35f, 0.02f, 0.45f,
+       0.25f, -0.03f, 0.3f},
+      {1, 2, 3},
+      mx::float32);
+  mx::array colors(
+      {0.8f, 0.2f, 0.1f,
+       0.1f, 0.7f, 0.4f},
+      {1, 2, 3},
+      mx::float32);
+  mx::array opacities({0.6f, 0.45f}, {1, 2}, mx::float32);
+  mx::array backgrounds({0.05f, 0.1f, 0.2f}, {1, 3}, mx::float32);
+  mx::array tile_offsets({0}, {1, 1, 1}, mx::int32);
+  mx::array flatten_ids({0, 1}, {2}, mx::int32);
+  mx::array v_render_colors(
+      {0.2f, -0.1f, 0.3f,
+       0.4f, 0.05f, -0.2f,
+       -0.3f, 0.25f, 0.15f,
+       0.1f, -0.4f, 0.35f},
+      {1, 2, 2, 3},
+      mx::float32);
+  mx::array v_render_alphas(
+      {0.2f, -0.1f, 0.05f, 0.3f},
+      {1, 2, 2, 1},
+      mx::float32);
+
+  gsplat_core::RasterizeToPixels3DGSParams params = {
+      .image_width = 2,
+      .image_height = 2,
+      .tile_size = 2,
+      .use_backgrounds = true,
+      .use_masks = false,
+      .packed = false,
+  };
+  gsplat_core::RasterizeToPixels3DGSInput fwd_cpu_input = {
+      .means2d = means2d,
+      .conics = conics,
+      .colors = colors,
+      .opacities = opacities,
+      .backgrounds = backgrounds,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .tile_offsets = tile_offsets,
+      .flatten_ids = flatten_ids,
+      .s = mx::Device::cpu,
+      .params = params,
+  };
+  gsplat_core::RasterizeToPixels3DGSInput fwd_gpu_input = fwd_cpu_input;
+  fwd_gpu_input.s = mx::Device::gpu;
+
+  std::vector<mx::array> fwd_cpu =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs(fwd_cpu_input);
+  std::vector<mx::array> fwd_gpu =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs(fwd_gpu_input);
+
+  gsplat_core::RasterizeToPixels3DGSBackwardInput bwd_cpu_input = {
+      .means2d = means2d,
+      .conics = conics,
+      .colors = colors,
+      .opacities = opacities,
+      .backgrounds = backgrounds,
+      .masks = mx::zeros({0}, mx::bool_, mx::Device::cpu),
+      .tile_offsets = tile_offsets,
+      .flatten_ids = flatten_ids,
+      .render_alphas = fwd_cpu[gsplat_core::kRenderAlphas],
+      .last_ids = fwd_cpu[gsplat_core::kLastIds],
+      .v_render_colors = v_render_colors,
+      .v_render_alphas = v_render_alphas,
+      .s = mx::Device::cpu,
+      .params = params,
+      .absgrad = true,
+  };
+  gsplat_core::RasterizeToPixels3DGSBackwardInput bwd_gpu_input = bwd_cpu_input;
+  bwd_gpu_input.render_alphas = fwd_gpu[gsplat_core::kRenderAlphas];
+  bwd_gpu_input.last_ids = fwd_gpu[gsplat_core::kLastIds];
+  bwd_gpu_input.s = mx::Device::gpu;
+
+  std::vector<mx::array> expected =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs_backward(bwd_cpu_input);
+  std::vector<mx::array> actual =
+      gsplat_core::gsplat_rasterize_to_pixels_3dgs_backward(bwd_gpu_input);
+  mx::eval(fwd_cpu);
+  mx::eval(fwd_gpu);
+  mx::eval(expected);
+  mx::eval(actual);
+
+  expect_shape(actual[gsplat_core::kRasterVMeans2D], {1, 2, 2},
+               "raster backward v_means2d");
+  expect_shape(actual[gsplat_core::kRasterVConics], {1, 2, 3},
+               "raster backward v_conics");
+  expect_shape(actual[gsplat_core::kRasterVColors], {1, 2, 3},
+               "raster backward v_colors");
+  expect_shape(actual[gsplat_core::kRasterVOpacities], {1, 2},
+               "raster backward v_opacities");
+  expect_shape(actual[gsplat_core::kRasterVBackgrounds], {1, 3},
+               "raster backward v_backgrounds");
+
+  const int sizes[6] = {4, 4, 6, 6, 2, 3};
+  for (int output = 0; output < 6; ++output) {
+    const float* expected_data = expected[output].data<float>();
+    const float* actual_data = actual[output].data<float>();
+    for (int i = 0; i < sizes[output]; ++i) {
+      expect_close(actual_data[i], expected_data[i], 1.0e-4f,
+                   "raster backward GPU reference");
+    }
+  }
+
+  std::cout << "rasterize_to_pixels_3dgs backward GPU smoke ok\n";
+}
+
 void test_spherical_harmonics_forward_reference() {
   mx::array dirs(
       {0.0f, 0.0f, 1.0f,
@@ -1864,6 +1979,7 @@ int main() {
                                         "rasterize_to_pixels_3dgs CPU");
     test_rasterize_to_pixels_3dgs_masks(mx::Device::gpu,
                                         "rasterize_to_pixels_3dgs GPU");
+    test_rasterize_to_pixels_3dgs_backward_gpu_reference();
     test_spherical_harmonics_forward_reference();
     test_spherical_harmonics_forward_gpu_reference();
     test_spherical_harmonics_forward_gpu_degree4_masks();

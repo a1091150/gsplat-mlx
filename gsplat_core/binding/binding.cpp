@@ -210,6 +210,67 @@ nb::dict rasterize_to_pixels_3dgs_forward(
   return result;
 }
 
+nb::dict rasterize_to_pixels_3dgs_backward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    const std::unordered_map<std::string, mx::array>& forward_outputs,
+    const std::unordered_map<std::string, mx::array>& cotangents,
+    int image_width,
+    int image_height,
+    int tile_size,
+    bool absgrad) {
+  const auto& means2d = require_key(inputs, "means2d");
+  const auto& conics = require_key(inputs, "conics");
+  const auto& colors = require_key(inputs, "colors");
+  const auto& opacities = require_key(inputs, "opacities");
+  const auto& tile_offsets = require_key(inputs, "tile_offsets");
+  const auto& flatten_ids = require_key(inputs, "flatten_ids");
+  const auto& render_alphas = require_key(forward_outputs, "render_alphas");
+  const auto& last_ids = require_key(forward_outputs, "last_ids");
+  const auto& v_render_colors = require_key(cotangents, "v_render_colors");
+  const auto& v_render_alphas = require_key(cotangents, "v_render_alphas");
+  mx::array backgrounds = get_or_empty(inputs, "backgrounds");
+  mx::array masks = get_or_empty(inputs, "masks");
+
+  gsplat_core::RasterizeToPixels3DGSBackwardInput input = {
+      .means2d = means2d,
+      .conics = conics,
+      .colors = colors,
+      .opacities = opacities,
+      .backgrounds = backgrounds,
+      .masks = masks,
+      .tile_offsets = tile_offsets,
+      .flatten_ids = flatten_ids,
+      .render_alphas = render_alphas,
+      .last_ids = last_ids,
+      .v_render_colors = v_render_colors,
+      .v_render_alphas = v_render_alphas,
+      .s = mx::Device::gpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .tile_size = tile_size,
+          .use_backgrounds = backgrounds.size() != 0,
+          .use_masks = masks.size() != 0,
+          .packed = means2d.ndim() == 2,
+      },
+      .absgrad = absgrad,
+  };
+
+  auto outputs = gsplat_core::gsplat_rasterize_to_pixels_3dgs_backward(input);
+  nb::dict result;
+  if (absgrad) {
+    result["v_means2d_abs"] = outputs[gsplat_core::kRasterVMeans2DAbs];
+  }
+  result["v_means2d"] = outputs[gsplat_core::kRasterVMeans2D];
+  result["v_conics"] = outputs[gsplat_core::kRasterVConics];
+  result["v_colors"] = outputs[gsplat_core::kRasterVColors];
+  result["v_opacities"] = outputs[gsplat_core::kRasterVOpacities];
+  if (backgrounds.size() != 0) {
+    result["v_backgrounds"] = outputs[gsplat_core::kRasterVBackgrounds];
+  }
+  return result;
+}
+
 mx::array spherical_harmonics_forward(
     int degrees_to_use,
     const std::unordered_map<std::string, mx::array>& inputs) {
@@ -352,6 +413,16 @@ NB_MODULE(_gsplat_core, m) {
       "image_width"_a,
       "image_height"_a,
       "tile_size"_a);
+  m.def(
+      "rasterize_to_pixels_3dgs_backward",
+      &rasterize_to_pixels_3dgs_backward,
+      "inputs"_a,
+      "forward_outputs"_a,
+      "cotangents"_a,
+      "image_width"_a,
+      "image_height"_a,
+      "tile_size"_a,
+      "absgrad"_a = false);
   m.def(
       "spherical_harmonics_forward",
       &spherical_harmonics_forward,

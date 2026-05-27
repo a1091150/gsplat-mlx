@@ -630,7 +630,7 @@
 - [x] Task 6.2: Backward API design doc and `.npz` fixture schema.
 - [x] Task 6.3: Spherical harmonics explicit backward.
 - [x] Task 6.4: Quat/scale covariance/precision explicit backward.
-- [ ] Task 6.5: Rasterize to pixels 3DGS explicit backward.
+- [x] Task 6.5: Rasterize to pixels 3DGS explicit backward.
 - [ ] Task 6.6: Projection EWA 3DGS fused explicit backward.
 - [ ] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
 - [ ] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
@@ -706,3 +706,18 @@
 - [x] Extend exported `.npz` compare support for `quat_scale_to_covar_preci_backward.npz`.
 - [x] Validate exported CUDA fixture `refs/quat_scale_to_covar_preci_backward.npz`.
 - [ ] Replace first-version finite-difference VJP with CUDA-style analytic VJP if tighter parity or speed is required.
+
+## Task 6.5 - Rasterize To Pixels 3DGS Explicit Backward
+- [x] Add `RasterizeToPixels3DGSBackwardInput`.
+- [x] Add explicit C++ entry `gsplat_rasterize_to_pixels_3dgs_backward(...)`.
+- [x] Add `GSPlatRasterizeToPixels3DGSBackward` MLX Primitive.
+- [x] Add Metal kernel `gsplat_rasterize_to_pixels_3dgs_backward_kernel`.
+- [x] Implement dense, unpacked 3DGS backward path.
+- [x] Support optional backgrounds and masks inputs.
+- [x] Support `absgrad` output for `v_means2d_abs`.
+- [x] Expose Python binding `rasterize_to_pixels_3dgs_backward(...)`.
+- [x] Add C++/Metal smoke comparing GPU backward against CPU backward.
+- [x] Add CUDA export script `scripts/export_ref/export_rasterize_to_pixels_3dgs_backward.py`.
+- [x] Extend exported `.npz` compare support for `rasterize_to_pixels_3dgs_backward.npz`.
+- [x] Validate exported CUDA fixture `refs/rasterize_to_pixels_3dgs_backward.npz`.
+- [ ] Add packed rasterize backward support if packed training path becomes in scope.
