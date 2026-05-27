@@ -1059,3 +1059,38 @@
   the exported Gaussian count.
 - [ ] Inspect exported `.spz` in the intended viewer and adjust coordinate or
   color conventions if needed.
+
+## Task 6.26 - Scanner Points Multi-View Training And SPZ Export
+- [x] Add `scripts/test/train_scanner_points_multiview_3dgs_mlx.py`.
+- [x] Read scanner `frame_*.jpg` / `frame_*.json` camera-image pairs through
+  the Task 6.21 loader.
+- [x] Read `points.ply` through the Task 6.24 path and initialize Gaussians from
+  the point cloud instead of random points.
+- [x] Use the Task 6.24 scanner axis transform and camera convention as the
+  first implementation assumption, because the visual alignment looked
+  reasonable.
+- [x] Train one shared Gaussian model across multiple scanner frames/views by
+  cycling or sampling views per step.
+- [x] Train means, log-scales, color logits/RGB, opacity logits, and
+  quats with separate Adam optimizers or per-parameter learning rates.
+- [x] Keep `viewspace_points` as an explicit dummy trainable proxy argument in
+  `mx.value_and_grad(..., argnums=...)` so screen-space gradient diagnostics
+  remain available.
+- [x] Render every training step through:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [x] Stop gradients through discrete `tile_offsets` and `flatten_ids`.
+- [x] Save target, initial render, final render, and side-by-side comparison
+  PNGs for selected scanner frames.
+- [x] Save `training_summary.json` with per-frame loss/PSNR, visible Gaussian
+  counts, intersection counts, viewspace gradient norm, exported point count,
+  and training settings.
+- [x] Export trained Gaussians to `.spz` at the end of training using the Task
+  6.25 SPZ convention, and write matching metadata.
+- [x] Add `make codex-scanner-points-train-spz` and related variables for
+  scanner points multi-view training and SPZ export.
+- [x] Validate a short smoke run with a small point subset, finite loss,
+  nonzero `viewspace_points` gradient, preview PNGs, and nonempty `.spz`
+  output.
+- [ ] Keep this as a smoke/minimal trainer first; defer densify, split, clone,
+  pruning, opacity reset, and full scanner optimizer policy until this path is
+  stable.

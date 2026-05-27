@@ -44,9 +44,18 @@ SCANNER_SPZ_MAX_POINTS ?= 50000
 SCANNER_SPZ_POINT_SCALE ?= 0.01
 SCANNER_SPZ_OPACITY ?= 0.65
 SCANNER_SPZ_COLOR_MODE ?= rgb
+SCANNER_POINTS_TRAIN_OUT ?= outputs/scanner_points_multiview_train
+SCANNER_POINTS_TRAIN_SPZ ?= outputs/scanner_points_multiview_train/trained_scanner_points.spz
+SCANNER_POINTS_TRAIN_WIDTH ?= 512
+SCANNER_POINTS_TRAIN_HEIGHT ?= 512
+SCANNER_POINTS_TRAIN_MAX_POINTS ?= 50000
+SCANNER_POINTS_TRAIN_FRAMES ?= 3
+SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
+SCANNER_POINTS_TRAIN_STEPS ?= 200
+SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -64,6 +73,7 @@ help:
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
+	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -185,6 +195,19 @@ codex-scanner-points-spz:
 		--point-scale $(SCANNER_SPZ_POINT_SCALE) \
 		--opacity $(SCANNER_SPZ_OPACITY) \
 		--color-mode $(SCANNER_SPZ_COLOR_MODE)
+
+codex-scanner-points-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanner_points_multiview_3dgs_mlx.py \
+		--data "$(SCANNER_DATASET)" \
+		--out-dir "$(SCANNER_POINTS_TRAIN_OUT)" \
+		--out-spz "$(SCANNER_POINTS_TRAIN_SPZ)" \
+		--width $(SCANNER_POINTS_TRAIN_WIDTH) \
+		--height $(SCANNER_POINTS_TRAIN_HEIGHT) \
+		--max-frames $(SCANNER_POINTS_TRAIN_FRAMES) \
+		--frame-step $(SCANNER_POINTS_TRAIN_FRAME_STEP) \
+		--max-points $(SCANNER_POINTS_TRAIN_MAX_POINTS) \
+		--steps $(SCANNER_POINTS_TRAIN_STEPS) \
+		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
