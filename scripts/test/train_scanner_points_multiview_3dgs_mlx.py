@@ -136,6 +136,31 @@ def init_sh_model_from_points(
     )
 
 
+def append_random_gaussians(
+    points: np.ndarray,
+    colors: np.ndarray,
+    count: int,
+    seed: int,
+    bounds_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if count <= 0:
+        return points, colors
+    if points.size == 0:
+        raise ValueError("Cannot append random Gaussians without existing point cloud bounds")
+
+    rng = np.random.default_rng(seed)
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    center = (mins + maxs) * 0.5
+    half_extent = np.maximum((maxs - mins) * 0.5 * bounds_scale, 1.0e-3)
+    random_points = rng.uniform(center - half_extent, center + half_extent, size=(count, 3)).astype(np.float32)
+    random_colors = rng.uniform(0.08, 0.95, size=(count, 3)).astype(np.float32)
+    return (
+        np.concatenate([points, random_points], axis=0).astype(np.float32),
+        np.concatenate([colors, random_colors], axis=0).astype(np.float32),
+    )
+
+
 def camera_center_from_viewmat(viewmats: mx.array) -> mx.array:
     rot = viewmats[:, :, :3, :3]
     trans = viewmats[:, :, :3, 3]
@@ -414,6 +439,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frame-step", type=int, default=1)
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-points", type=int, default=50000)
+    parser.add_argument("--num-random-gaussians", type=int, default=0)
+    parser.add_argument("--random-gaussian-bounds-scale", type=float, default=1.05)
     parser.add_argument("--point-scale", type=float, default=0.01)
     parser.add_argument("--opacity", type=float, default=0.65)
     parser.add_argument("--seed", type=int, default=37)
@@ -439,6 +466,10 @@ def main() -> None:
         raise ValueError("--sh-degree must be <= --max-sh-degree")
     if args.max_sh_degree > MAX_SUPPORTED_SH_DEGREE:
         raise ValueError(f"--max-sh-degree currently supports up to {MAX_SUPPORTED_SH_DEGREE}")
+    if args.num_random_gaussians < 0:
+        raise ValueError("--num-random-gaussians must be nonnegative")
+    if args.random_gaussian_bounds_scale <= 0.0:
+        raise ValueError("--random-gaussian-bounds-scale must be positive")
     lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
     args.out_dir.mkdir(parents=True, exist_ok=True)
     frames = collect_frames(args.data, args.max_frames, args.frame_step, args.start_index)
@@ -448,6 +479,13 @@ def main() -> None:
         for camera in cameras
     ]
     points, colors, raw_point_count = prepare_points(args.data, args.max_points, args.seed)
+    points, colors = append_random_gaussians(
+        points,
+        colors,
+        args.num_random_gaussians,
+        args.seed + 1009,
+        args.random_gaussian_bounds_scale,
+    )
     if args.color_mode == "rgb":
         model = init_rgb_model_from_points(points, colors, args.point_scale, args.opacity)
     else:
@@ -672,6 +710,9 @@ def main() -> None:
         "raw_point_count": raw_point_count,
         "exported_gaussians": exported_gaussians,
         "max_points": args.max_points,
+        "point_cloud_gaussians": int(points.shape[0] - args.num_random_gaussians),
+        "random_gaussians": args.num_random_gaussians,
+        "random_gaussian_bounds_scale": args.random_gaussian_bounds_scale,
         "frames": len(cameras),
         "steps": args.steps,
         "initial_mean_loss": initial_mean_loss,
