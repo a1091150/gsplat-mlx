@@ -1225,6 +1225,9 @@
   `n_opacity_reset`, `grad2d_mean/max`, and visible counts.
 - [x] Task 6.28H: Add optional Makefile variables for strategy thresholds and
   disabled-by-default refinement in smoke runs.
+- [x] Task 6.28I: Add gsplat-style scale prune after `reset_every`, including
+  3D scale pruning and optional 2D radius pruning when radius tracking is
+  enabled.
 
 ### Validation Plan
 - Start with tiny scanner runs and force low thresholds so each operation can be

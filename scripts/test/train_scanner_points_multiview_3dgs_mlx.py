@@ -149,6 +149,9 @@ class ScannerDefaultStrategyRuntime:
             "n_clone": 0,
             "n_split": 0,
             "n_prune": 0,
+            "n_prune_opacity": 0,
+            "n_prune_scale3d": 0,
+            "n_prune_scale2d": 0,
             "n_opacity_reset": 0,
         }
         self.last_grad2d_stats = self._grad2d_stats()
@@ -459,17 +462,33 @@ class ScannerDefaultStrategyRuntime:
         mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
         return int(selected.size)
 
-    def _prune_by_opacity(
+    def _prune_gaussians(
         self,
+        step: int,
         model: Tiny3DGSModel | ScannerPointsSHModel,
         optimizers: dict[str, Adam],
         color_mode: str,
-    ) -> int:
-        mx.eval(model.opacity_logits)
+    ) -> tuple[int, dict]:
+        mx.eval(model.opacity_logits, model.log_scales)
         opacities = 1.0 / (1.0 + np.exp(-np.asarray(model.opacity_logits[0], dtype=np.float32)))
-        prune = opacities < self.config.prune_opa
+        prune_opacity = opacities < self.config.prune_opa
+        prune_scale3d = np.zeros_like(prune_opacity, dtype=bool)
+        prune_scale2d = np.zeros_like(prune_opacity, dtype=bool)
+        if step > self.config.reset_every:
+            scales = np.exp(np.asarray(model.log_scales[0], dtype=np.float32))
+            prune_scale3d = scales.max(axis=-1) > self.config.prune_scale3d * self.config.scene_scale
+            if self.radii is not None and step < self.config.refine_scale2d_stop_iter:
+                prune_scale2d = self.radii > self.config.prune_scale2d
+
+        prune = prune_opacity | prune_scale3d | prune_scale2d
+        prune_breakdown = {
+            "opacity": int(np.count_nonzero(prune_opacity)),
+            "scale3d": int(np.count_nonzero(prune_scale3d)),
+            "scale2d": int(np.count_nonzero(prune_scale2d)),
+            "total_unique": int(np.count_nonzero(prune)),
+        }
         if not np.any(prune):
-            return 0
+            return 0, prune_breakdown
         keep = np.where(~prune)[0].astype(np.int32)
         if keep.size == 0:
             keep = np.array([int(np.argmax(opacities))], dtype=np.int32)
@@ -484,7 +503,8 @@ class ScannerDefaultStrategyRuntime:
             self._apply_keep_to_param_and_optimizer(model, optimizers, name, keep)
         self._apply_keep_to_state(keep)
         mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
-        return n_prune
+        prune_breakdown["actual_removed"] = n_prune
+        return n_prune, prune_breakdown
 
     def _reset_opacity(
         self,
@@ -531,11 +551,18 @@ class ScannerDefaultStrategyRuntime:
             if scheduled_refine
             else 0
         )
-        n_prune = self._prune_by_opacity(model, optimizers, color_mode) if scheduled_refine else 0
+        n_prune, prune_breakdown = (
+            self._prune_gaussians(step, model, optimizers, color_mode)
+            if scheduled_refine
+            else (0, {"opacity": 0, "scale3d": 0, "scale2d": 0, "total_unique": 0, "actual_removed": 0})
+        )
         n_opacity_reset = self._reset_opacity(model, optimizers) if scheduled_reset else 0
         self.totals["n_clone"] += n_clone
         self.totals["n_split"] += n_split
         self.totals["n_prune"] += n_prune
+        self.totals["n_prune_opacity"] += prune_breakdown["opacity"]
+        self.totals["n_prune_scale3d"] += prune_breakdown["scale3d"]
+        self.totals["n_prune_scale2d"] += prune_breakdown["scale2d"]
         self.totals["n_opacity_reset"] += n_opacity_reset
         after_count = int(model.means.shape[1])
         self.last_gaussians = after_count
@@ -549,9 +576,10 @@ class ScannerDefaultStrategyRuntime:
                 "n_clone": n_clone,
                 "n_split": n_split,
                 "n_prune": n_prune,
+                "prune_breakdown": prune_breakdown,
                 "n_opacity_reset": n_opacity_reset,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "clone_split_prune_reset_summary_task_6_28g",
+                "status": "clone_split_scale_prune_reset_task_6_28i",
             }
         )
 
@@ -565,7 +593,7 @@ class ScannerDefaultStrategyRuntime:
             )
         )
         return {
-            "implementation_phase": "task_6_28g_summary_diagnostics",
+            "implementation_phase": "task_6_28i_scale_prune",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
@@ -580,6 +608,11 @@ class ScannerDefaultStrategyRuntime:
                 "clone": self.totals["n_clone"],
                 "split": self.totals["n_split"],
                 "prune": self.totals["n_prune"],
+                "prune_by_reason": {
+                    "opacity": self.totals["n_prune_opacity"],
+                    "scale3d": self.totals["n_prune_scale3d"],
+                    "scale2d": self.totals["n_prune_scale2d"],
+                },
                 "opacity_reset": self.totals["n_opacity_reset"],
             },
             "grad2d_accumulation": "dense_viewspace_points_gradient",
@@ -593,7 +626,7 @@ class ScannerDefaultStrategyRuntime:
             },
             "opacity_reset_target": self.opacity_reset_target(),
             "opacity_reset_target_logit": self.opacity_reset_target_logit(),
-            "topology_changes": "clone_split_opacity_prune_reset_with_summary_diagnostics_task_6_28g",
+            "topology_changes": "clone_split_opacity_scale_prune_reset_task_6_28i",
         }
 
 
