@@ -1212,7 +1212,7 @@
 - [x] Task 6.28A: Add a small Python strategy/state object to
   `train_scanner_points_multiview_3dgs_mlx.py` with thresholds, counters,
   schedule flags, and summary logging only.
-- [ ] Task 6.28B: Accumulate dense 3DGS `viewspace_points` gradients into
+- [x] Task 6.28B: Accumulate dense 3DGS `viewspace_points` gradients into
   `grad2d/count` and validate nonzero counts on smoke data.
 - [ ] Task 6.28C: Implement prune by opacity first because it only removes rows
   and is easiest to validate.

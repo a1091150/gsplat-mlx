@@ -128,6 +128,13 @@ class ScannerDefaultStrategyRuntime:
         self.config = config
         self.initial_gaussians = int(initial_gaussians)
         self.last_gaussians = int(initial_gaussians)
+        self.grad2d = np.zeros((initial_gaussians,), dtype=np.float32)
+        self.count = np.zeros((initial_gaussians,), dtype=np.float32)
+        self.radii = (
+            np.zeros((initial_gaussians,), dtype=np.float32)
+            if config.refine_scale2d_stop_iter > 0
+            else None
+        )
         self.events: list[dict] = []
         self.totals = {
             "n_clone": 0,
@@ -135,9 +142,72 @@ class ScannerDefaultStrategyRuntime:
             "n_prune": 0,
             "n_opacity_reset": 0,
         }
+        self.last_grad2d_stats = self._grad2d_stats()
+
+    def _ensure_size(self, gaussian_count: int) -> None:
+        gaussian_count = int(gaussian_count)
+        if self.grad2d.shape[0] == gaussian_count:
+            return
+        old_count = self.grad2d.shape[0]
+        if gaussian_count < old_count:
+            self.grad2d = self.grad2d[:gaussian_count]
+            self.count = self.count[:gaussian_count]
+            if self.radii is not None:
+                self.radii = self.radii[:gaussian_count]
+            return
+        pad = gaussian_count - old_count
+        self.grad2d = np.concatenate([self.grad2d, np.zeros((pad,), dtype=np.float32)])
+        self.count = np.concatenate([self.count, np.zeros((pad,), dtype=np.float32)])
+        if self.radii is not None:
+            self.radii = np.concatenate([self.radii, np.zeros((pad,), dtype=np.float32)])
+
+    def update_state(
+        self,
+        d_viewspace: mx.array,
+        radii: mx.array,
+        width: int,
+        height: int,
+        n_cameras: int,
+    ) -> None:
+        if not self.config.enabled:
+            return
+        mx.eval(d_viewspace, radii)
+        grads = np.asarray(d_viewspace, dtype=np.float32)
+        radii_np = np.asarray(radii, dtype=np.float32)
+        self._ensure_size(grads.shape[-2])
+
+        grads[..., 0] *= float(width) / 2.0 * float(n_cameras)
+        grads[..., 1] *= float(height) / 2.0 * float(n_cameras)
+        visible = np.all(radii_np > 0.0, axis=-1)
+        if not np.any(visible):
+            self.last_grad2d_stats = self._grad2d_stats()
+            return
+
+        gaussian_ids = np.where(visible)[-1]
+        grad_norms = np.linalg.norm(grads[visible], axis=-1)
+        np.add.at(self.grad2d, gaussian_ids, grad_norms)
+        np.add.at(self.count, gaussian_ids, np.ones_like(grad_norms, dtype=np.float32))
+        if self.radii is not None:
+            normalized_radii = radii_np[visible].max(axis=-1) / float(max(width, height))
+            self.radii[gaussian_ids] = np.maximum(self.radii[gaussian_ids], normalized_radii)
+        self.last_grad2d_stats = self._grad2d_stats()
+
+    def _grad2d_stats(self) -> dict:
+        visible = self.count > 0.0
+        avg = np.zeros_like(self.grad2d)
+        avg[visible] = self.grad2d[visible] / np.maximum(self.count[visible], 1.0)
+        return {
+            "visible_gaussians": int(np.count_nonzero(visible)),
+            "total_observations": int(self.count.sum()),
+            "grad2d_mean": float(avg[visible].mean()) if np.any(visible) else 0.0,
+            "grad2d_max": float(avg[visible].max()) if np.any(visible) else 0.0,
+            "count_max": float(self.count.max()) if self.count.size else 0.0,
+            "radii_max": float(self.radii.max()) if self.radii is not None and self.radii.size else None,
+        }
 
     def after_optimizer_step(self, step: int, gaussian_count: int) -> None:
         self.last_gaussians = int(gaussian_count)
+        self._ensure_size(gaussian_count)
         scheduled_refine = self.config.should_refine(step)
         scheduled_reset = self.config.should_reset_opacity(step)
         if not scheduled_refine and not scheduled_reset:
@@ -153,20 +223,22 @@ class ScannerDefaultStrategyRuntime:
                 "n_split": 0,
                 "n_prune": 0,
                 "n_opacity_reset": 0,
-                "status": "scheduled_noop_task_6_28a",
+                "grad2d_stats": self.last_grad2d_stats,
+                "status": "scheduled_noop_task_6_28b",
             }
         )
 
     def summary(self) -> dict:
         return {
-            "implementation_phase": "task_6_28a_strategy_skeleton",
+            "implementation_phase": "task_6_28b_grad2d_accumulation",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
             "final_gaussians": self.last_gaussians,
             "events": self.events,
             "totals": self.totals,
-            "grad2d_accumulation": "not_implemented_task_6_28b",
+            "grad2d_accumulation": "dense_viewspace_points_gradient",
+            "grad2d_stats": self.last_grad2d_stats,
             "topology_changes": "not_implemented_task_6_28c_to_6_28f",
         }
 
@@ -649,7 +721,7 @@ def main() -> None:
         local = Tiny3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
         render = render_model(local, viewspace_points, viewmats, Ks, args.width, args.height, args.tile_size)
         diff = render["render_colors"] - target
-        return mx.mean(diff * diff)
+        return mx.mean(diff * diff), render["radii"]
 
     def sh_loss_fn(
         means: mx.array,
@@ -682,7 +754,7 @@ def main() -> None:
             args.sh_degree,
         )
         diff = render["render_colors"] - target
-        return mx.mean(diff * diff)
+        return mx.mean(diff * diff), render["radii"]
 
     rgb_grad_fn = mx.value_and_grad(rgb_loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     sh_grad_fn = mx.value_and_grad(sh_loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
@@ -707,7 +779,7 @@ def main() -> None:
         viewmats, Ks = camera_arrays(camera)
         viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
         if args.color_mode == "rgb":
-            loss, grads = rgb_grad_fn(
+            (loss, strategy_radii), grads = rgb_grad_fn(
                 model.means,
                 model.quats,
                 model.log_scales,
@@ -720,7 +792,7 @@ def main() -> None:
             )
             d_means, d_quats, d_log_scales, d_color_logits, d_opacity_logits, d_viewspace = grads
         else:
-            loss, grads = sh_grad_fn(
+            (loss, strategy_radii), grads = sh_grad_fn(
                 model.means,
                 model.quats,
                 model.log_scales,
@@ -766,6 +838,14 @@ def main() -> None:
                 model.features_dc,
                 model.features_rest,
                 model.opacity_logits,
+            )
+        if strategy.config.enabled:
+            strategy.update_state(
+                d_viewspace,
+                strategy_radii,
+                width=args.width,
+                height=args.height,
+                n_cameras=1,
             )
         strategy.after_optimizer_step(step, model.means.shape[1])
 
