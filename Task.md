@@ -1241,3 +1241,55 @@
 - Validate SPZ export after topology changes for both RGB and SH modes.
 - Keep image quality expectations weak at first; the primary check is finite
   loss, nonzero gradient stats, correct counts, and nonempty SPZ output.
+
+## Task 6.29 - Scanner Trainer Loss and Remaining gsplat Alignment
+
+### Completed
+- [x] Switch `train_scanner_points_multiview_3dgs_mlx.py` training loss to
+  `mlx.nn.losses.l1_loss` for both RGB and SH color paths.
+- [x] Report initial/final frame losses with the same L1 metric used for
+  training.
+- [x] Keep PSNR as an MSE-derived image-quality diagnostic and record the active
+  loss function in `training_summary.json`.
+
+### Remaining After-Training Strategy Alignment
+- [ ] Validate clone/split/prune/reset thresholds on long scanner training runs.
+- [ ] Implement real `absgrad` behavior instead of only preserving the CLI/config
+  option.
+- [ ] Add a dedicated smoke for `refine_scale2d_stop_iter > 0` so 2D radius
+  split/prune is exercised.
+- [ ] Validate `revised_opacity` split on longer training runs and decide whether
+  it should be exposed as a recommended scanner setting.
+- [ ] Keep MCMC relocation/noise, distributed packed paths, sparse gradients, and
+  visible Adam outside the current first scanner trainer implementation unless a
+  later task explicitly brings them in.
+
+### Remaining Training Behavior Alignment
+- [ ] Add progressive SH degree scheduling. Current `--sh-degree` is fixed for
+  the whole run; it does not automatically increase like common 3DGS/gsplat
+  training setups.
+- [ ] Add optimizer learning-rate schedules for means, SH/features, opacity,
+  scales, and quats. Current trainer uses fixed Adam learning rates.
+- [ ] Decide whether to add an SSIM/DSSIM component or keep the scanner trainer
+  intentionally L1-only for this MLX smoke path.
+- [ ] Add optional background/mask handling if scanner frames require it.
+- [ ] Keep camera optimization and appearance embeddings out of scope until the
+  low-level gsplat_core path is stable.
+
+### Remaining Low-Level gsplat API Parity
+- [ ] Implement packed projection/rasterize forward paths if dense-only training
+  becomes insufficient.
+- [ ] Implement `rasterize_to_indices_3dgs` if an index-only render/debug path is
+  needed.
+- [ ] Finish projection backward GPU/analytic parity and packed backward support
+  only after dense scanner training is stable.
+- [ ] Continue CUDA/PyTorch parity through exported `.npz` references for forward
+  and backward edge cases.
+
+### Remaining SPZ and Viewer Alignment
+- [ ] Inspect exported RGB and SH `.spz` files in the target viewer after longer
+  scanner training runs.
+- [ ] Confirm coordinate, quaternion, opacity-logit, and SH coefficient
+  conventions against the viewer and, where possible, gsplat/PyTorch output.
+- [ ] Decide whether SPZ export should store trained SH degree exactly or pad /
+  clamp to viewer-supported degrees.
