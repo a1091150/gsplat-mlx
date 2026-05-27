@@ -1214,7 +1214,7 @@
   schedule flags, and summary logging only.
 - [x] Task 6.28B: Accumulate dense 3DGS `viewspace_points` gradients into
   `grad2d/count` and validate nonzero counts on smoke data.
-- [ ] Task 6.28C: Implement prune by opacity first because it only removes rows
+- [x] Task 6.28C: Implement prune by opacity first because it only removes rows
   and is easiest to validate.
 - [ ] Task 6.28D: Implement clone/duplicate for high-gradient small Gaussians.
 - [ ] Task 6.28E: Implement split for high-gradient large Gaussians with

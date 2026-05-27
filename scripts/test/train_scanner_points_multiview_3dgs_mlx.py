@@ -35,6 +35,15 @@ from train_tiny_3dgs_mlx import Tiny3DGSModel, image_to_u8, normalize_quats, ren
 
 SH_C0 = 0.28209479177387814
 MAX_SUPPORTED_SH_DEGREE = 3
+GAUSSIAN_AXES = {
+    "means": 1,
+    "quats": 1,
+    "log_scales": 1,
+    "opacity_logits": 1,
+    "color_logits": 2,
+    "features_dc": 1,
+    "features_rest": 1,
+}
 
 
 class ScannerPointsSHModel(nn.Module):
@@ -205,26 +214,93 @@ class ScannerDefaultStrategyRuntime:
             "radii_max": float(self.radii.max()) if self.radii is not None and self.radii.size else None,
         }
 
-    def after_optimizer_step(self, step: int, gaussian_count: int) -> None:
-        self.last_gaussians = int(gaussian_count)
+    def _apply_keep_to_state(self, keep: np.ndarray) -> None:
+        self.grad2d = self.grad2d[keep]
+        self.count = self.count[keep]
+        if self.radii is not None:
+            self.radii = self.radii[keep]
+        self.last_grad2d_stats = self._grad2d_stats()
+
+    def _take_gaussians(self, array: mx.array, keep: np.ndarray, axis: int) -> mx.array:
+        return mx.take(array, mx.array(keep.astype(np.int32), dtype=mx.int32), axis=axis)
+
+    def _apply_keep_to_param_and_optimizer(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        name: str,
+        keep: np.ndarray,
+    ) -> None:
+        if not hasattr(model, name):
+            return
+        axis = GAUSSIAN_AXES[name]
+        setattr(model, name, self._take_gaussians(getattr(model, name), keep, axis))
+        optimizer = optimizers.get(name)
+        if optimizer is None or name not in optimizer.state:
+            return
+        param_state = optimizer.state[name]
+        for state_name in ("m", "v"):
+            if state_name in param_state:
+                param_state[state_name] = self._take_gaussians(param_state[state_name], keep, axis)
+
+    def _prune_by_opacity(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        color_mode: str,
+    ) -> int:
+        mx.eval(model.opacity_logits)
+        opacities = 1.0 / (1.0 + np.exp(-np.asarray(model.opacity_logits[0], dtype=np.float32)))
+        prune = opacities < self.config.prune_opa
+        if not np.any(prune):
+            return 0
+        keep = np.where(~prune)[0].astype(np.int32)
+        if keep.size == 0:
+            keep = np.array([int(np.argmax(opacities))], dtype=np.int32)
+        n_prune = int(opacities.shape[0] - keep.shape[0])
+
+        names = ["means", "quats", "log_scales", "opacity_logits"]
+        if color_mode == "rgb":
+            names.append("color_logits")
+        else:
+            names.extend(["features_dc", "features_rest"])
+        for name in names:
+            self._apply_keep_to_param_and_optimizer(model, optimizers, name, keep)
+        self._apply_keep_to_state(keep)
+        mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
+        return n_prune
+
+    def after_optimizer_step(
+        self,
+        step: int,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+        color_mode: str,
+    ) -> None:
+        gaussian_count = int(model.means.shape[1])
+        self.last_gaussians = gaussian_count
         self._ensure_size(gaussian_count)
         scheduled_refine = self.config.should_refine(step)
         scheduled_reset = self.config.should_reset_opacity(step)
         if not scheduled_refine and not scheduled_reset:
             return
+        n_prune = self._prune_by_opacity(model, optimizers, color_mode) if scheduled_refine else 0
+        self.totals["n_prune"] += n_prune
+        after_count = int(model.means.shape[1])
+        self.last_gaussians = after_count
         self.events.append(
             {
                 "step": int(step),
                 "scheduled_refine": bool(scheduled_refine),
                 "scheduled_opacity_reset": bool(scheduled_reset),
                 "num_gaussians_before": int(gaussian_count),
-                "num_gaussians_after": int(gaussian_count),
+                "num_gaussians_after": after_count,
                 "n_clone": 0,
                 "n_split": 0,
-                "n_prune": 0,
+                "n_prune": n_prune,
                 "n_opacity_reset": 0,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "scheduled_noop_task_6_28b",
+                "status": "opacity_prune_task_6_28c",
             }
         )
 
@@ -239,7 +315,7 @@ class ScannerDefaultStrategyRuntime:
             "totals": self.totals,
             "grad2d_accumulation": "dense_viewspace_points_gradient",
             "grad2d_stats": self.last_grad2d_stats,
-            "topology_changes": "not_implemented_task_6_28c_to_6_28f",
+            "topology_changes": "opacity_prune_only_task_6_28c",
         }
 
 
@@ -847,7 +923,7 @@ def main() -> None:
                 height=args.height,
                 n_cameras=1,
             )
-        strategy.after_optimizer_step(step, model.means.shape[1])
+        strategy.after_optimizer_step(step, model, optimizers, args.color_mode)
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
