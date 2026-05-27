@@ -2,8 +2,8 @@
 
 ## Context
 
-Projection EWA 3DGS forward has a Metal path, but projection backward is still a
-CPU reference path.
+Projection EWA 3DGS forward has a Metal path, and projection backward now has a
+first-pass Metal path for dense covars + pinhole.
 
 The current explicit backward API is useful for parity and debugging:
 
@@ -14,27 +14,33 @@ projection_ewa_3dgs_fused_backward(...)
 However, it should not be treated as the final training graph when the forward
 primitive runs on GPU.
 
-## Current limitation
+## Resolved routing
 
 `GSPlatProjectionEWA3DGSFused::vjp(...)` builds a backward primitive from the
 forward primitive outputs and cotangents.
 
-The problematic path is:
+The supported full-GPU path is now:
 
 ```text
 GPU projection forward primitive
   -> vjp(...)
-  -> CPU projection backward primitive
+  -> GPU projection backward primitive on stream()
   -> v_means / v_covars / v_quats / v_scales
 ```
 
-This crosses device/stream boundaries inside MLX autograd. With the projection
-`vjp(...)` materialization removed, Python autograd smoke currently produces
-zero `v_means` / `v_means3d` even though explicit C++ backward tests pass.
+This path is selected only when the current Metal backward implementation
+supports the request:
 
-This indicates the issue is not the analytic CPU backward math itself. The
-fragile part is the lazy graph dependency between GPU forward outputs and the
-CPU backward primitive created inside `vjp(...)`.
+```text
+use_covars = true
+camera_model = pinhole
+v_viewmats is not requested
+```
+
+Unsupported requests still use the CPU reference path for now. The CPU
+reference path remains useful for parity and debugging, but it is not the final
+GPU training graph because it can cross device/stream boundaries inside MLX
+autograd.
 
 ## Why pure GPU graph is the target
 
@@ -52,7 +58,7 @@ up ops on the primitive stream. A pure GPU path should therefore keep projection
 forward and projection backward on the same GPU stream and avoid explicit
 `mx::eval(...)` in `vjp(...)`.
 
-## Full GPU gap
+## Full GPU status
 
 The first-pass implementation now exists for the dense pinhole covars path:
 
@@ -71,12 +77,12 @@ v_means
 v_covars
 ```
 
-The remaining gap before projection autograd can be treated as a pure GPU
-training path is wiring `GSPlatProjectionEWA3DGSFused::vjp(...)` to run the
-backward primitive on `stream()` and validating that no `vjp(...)`
-materialization is needed.
+`GSPlatProjectionEWA3DGSFused::vjp(...)` now routes the supported dense covars
+pinhole path to `stream()`. The projection autograd and dense training smoke
+checks pass without extra `mx::eval(...)` materialization in the `vjp(...)`
+layer.
 
-Until that is validated, projection training still has two imperfect choices:
+Unsupported projection training requests still have two imperfect choices:
 
 ```text
 1. CPU reference backward

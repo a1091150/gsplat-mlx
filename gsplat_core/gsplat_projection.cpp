@@ -1115,6 +1115,12 @@ std::vector<mx::array> GSPlatProjectionEWA3DGSFused::vjp(
 
   const bool needs_viewmats =
       std::find(argnums.begin(), argnums.end(), 5) != argnums.end();
+  const bool use_gpu_backward =
+      params_.use_covars && params_.camera_model == 0 && !needs_viewmats;
+  mx::StreamOrDevice backward_stream = mx::Device::cpu;
+  if (use_gpu_backward) {
+    backward_stream = stream();
+  }
   ProjectionEWA3DGSFusedBackwardInput input = {
       .means = primals[0],
       .covars = primals[1],
@@ -1133,7 +1139,7 @@ std::vector<mx::array> GSPlatProjectionEWA3DGSFused::vjp(
       .v_compensations = params_.calc_compensations
                              ? cotangents[kCompensations]
                              : mx::zeros({0}, mx::float32),
-      .s = mx::Device::cpu,
+      .s = backward_stream,
       .params = params_,
       .viewmats_requires_grad = needs_viewmats,
   };

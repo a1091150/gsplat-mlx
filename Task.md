@@ -806,9 +806,21 @@
 - [x] Add C++/Xcode smoke comparing projection GPU backward against CPU reference.
 - [ ] Add optional `v_viewmats`.
 - [ ] Add quats/scales GPU backward after covars path parity is stable.
-- [ ] Change projection `vjp(...)` backward input from CPU to `stream()` after
+- [x] Change projection `vjp(...)` backward input from CPU to `stream()` after
   Metal backward is available.
-- [ ] Validate no projection `vjp(...)` materialization is needed when forward
+- [x] Validate no projection `vjp(...)` materialization is needed when forward
   and backward run on the same GPU stream.
-- [ ] Re-enable projection autograd and training smoke as required full-GPU
+- [x] Re-enable projection autograd and training smoke as required full-GPU
   acceptance checks.
+
+## Task 6.12 - Projection VJP Full GPU Path Routing
+- [x] Route projection `vjp(...)` to the current primitive stream when the
+  request is supported by the first-pass Metal backward path:
+  dense covars, pinhole camera, and no `v_viewmats`.
+- [x] Keep CPU/reference routing for unsupported projection backward cases:
+  quats/scales path, `v_viewmats`, non-pinhole cameras, packed paths, and
+  future distortion variants.
+- [x] Validate projection autograd smoke with `v_means`, `v_covars`, and
+  `viewspace_points` gradients.
+- [x] Validate dense training smoke without adding extra `mx::eval(...)` inside
+  projection `vjp(...)`.
