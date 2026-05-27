@@ -32,9 +32,16 @@ SCANNER_TRAIN_N ?= 1024
 SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
 SCANNER_TRAIN_STEPS ?= 200
+SCANNER_ALIGN_OUT ?= outputs/scanner_points_alignment
+SCANNER_ALIGN_WIDTH ?= 512
+SCANNER_ALIGN_HEIGHT ?= 512
+SCANNER_ALIGN_FRAMES ?= 3
+SCANNER_ALIGN_FRAME_STEP ?= 1
+SCANNER_ALIGN_MAX_POINTS ?= 50000
+SCANNER_ALIGN_POINT_SCALE ?= 0.01
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -50,6 +57,7 @@ help:
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
+	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -151,6 +159,17 @@ codex-scanner-random-train:
 		--max-frames $(SCANNER_TRAIN_FRAMES) \
 		--frame-step $(SCANNER_TRAIN_FRAME_STEP) \
 		--steps $(SCANNER_TRAIN_STEPS)
+
+codex-scanner-points-align:
+	conda run -n $(CONDA_ENV) python scripts/test/scanner_points_alignment_render.py \
+		--data "$(SCANNER_DATASET)" \
+		--out-dir "$(SCANNER_ALIGN_OUT)" \
+		--width $(SCANNER_ALIGN_WIDTH) \
+		--height $(SCANNER_ALIGN_HEIGHT) \
+		--max-frames $(SCANNER_ALIGN_FRAMES) \
+		--frame-step $(SCANNER_ALIGN_FRAME_STEP) \
+		--max-points $(SCANNER_ALIGN_MAX_POINTS) \
+		--point-scale $(SCANNER_ALIGN_POINT_SCALE)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

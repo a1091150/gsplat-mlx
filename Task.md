@@ -1015,24 +1015,26 @@
   `points.ply` initialization.
 
 ## Task 6.24 - Scanner `points.ply` Camera Alignment Render
-- [ ] Add a scanner dataset alignment script that reads both scanner cameras
+- [x] Add `scripts/test/scanner_points_alignment_render.py`.
+- [x] Add a scanner dataset alignment script that reads both scanner cameras
   and `points.ply`.
-- [ ] Use `/Users/yangdunfu/Documents/GitHub/fastgs_core/scripts/train_scanner_fastgs2.py`
+- [x] Use `/Users/yangdunfu/Documents/GitHub/fastgs_core/scripts/train_scanner_fastgs2.py`
   as a reference for `points.ply` parsing, axis transform, color loading, and
   camera/image pairing, but do not assume its convention is automatically
   correct for gsplat_core.
-- [ ] Convert `points.ply` positions and RGB colors into gsplat_core Gaussian
+- [x] Convert `points.ply` positions and RGB colors into gsplat_core Gaussian
   parameters without training.
-- [ ] Initialize simple render-only Gaussian attributes:
+- [x] Initialize simple render-only Gaussian attributes:
   means from points, small linear scales, identity/random quats, sigmoid
   opacities, and RGB colors.
-- [ ] Render selected scanner frames through:
+- [x] Render selected scanner frames through:
   projection -> intersect tile -> intersect offset -> rasterize.
-- [ ] Save target image, point-cloud render, and side-by-side comparison PNGs
+- [x] Save target image, point-cloud render, and side-by-side comparison PNGs
   per selected frame.
-- [ ] Save debug metadata with camera `K`, `viewmat`, point count, visible
+- [x] Save debug metadata with camera `K`, `viewmat`, point count, visible
   point/Gaussian count, intersection count, and render alpha stats.
-- [ ] Add a Makefile target for the alignment render smoke.
+- [x] Add `make codex-scanner-points-align` and related Makefile variables.
+- [x] Validate a short alignment render with visible points and nonzero alpha.
 - [ ] Use the rendered alignment previews to decide whether the FastGS scanner
   axis transform/camera flip matches gsplat_core expectations.
 - [ ] If alignment is wrong, document candidate convention fixes instead of
