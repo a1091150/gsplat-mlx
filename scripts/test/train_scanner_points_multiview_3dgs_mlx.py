@@ -27,7 +27,6 @@ from train_scanner_random_3dgs_mlx import (
     concat_compare,
     mean_loss,
     mx_logit,
-    save_frame_targets,
 )
 from train_tiny_3dgs_mlx import Tiny3DGSModel, image_to_u8, normalize_quats, render_model
 
@@ -1152,7 +1151,6 @@ def main() -> None:
     else:
         model = init_sh_model_from_points(points, colors, args.point_scale, args.opacity, args.max_sh_degree)
     strategy = ScannerDefaultStrategyRuntime(strategy_config, initial_gaussians=model.means.shape[1])
-    save_frame_targets(args.out_dir, cameras, targets)
 
     if args.color_mode == "rgb":
         initial_stats = evaluate_rgb_frames(model, cameras, targets, args.width, args.height, args.tile_size)
@@ -1167,11 +1165,6 @@ def main() -> None:
             initial_active_sh_degree,
         )
     initial_mean_loss = mean_loss(initial_stats)
-    for item in initial_stats:
-        write_png(
-            args.out_dir / f"step_0000_frame_{item['frame_index']:05d}.png",
-            image_to_u8(item["image"]),
-        )
     active_sh_degree = initial_active_sh_degree
     sh_degree_events = (
         [{"step": 1, "active_sh_degree": int(initial_active_sh_degree)}]
@@ -1350,7 +1343,6 @@ def main() -> None:
     target_images = [np.asarray(target[0], dtype=np.float32) for target in targets]
     for initial, final, target_image in zip(initial_stats, final_stats, target_images, strict=True):
         frame_index = final["frame_index"]
-        write_png(args.out_dir / f"step_{args.steps:04d}_frame_{frame_index:05d}.png", image_to_u8(final["image"]))
         write_png(
             args.out_dir / f"compare_frame_{frame_index:05d}.png",
             image_to_u8(concat_compare(target_image, initial["image"], final["image"])),
@@ -1416,6 +1408,7 @@ def main() -> None:
         "steps": args.steps,
         "loss_function": "mlx.nn.losses.l1_loss",
         "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
+        "image_outputs": "compare_frame_*.png only by default",
         "initial_mean_loss": initial_mean_loss,
         "final_mean_loss": final_mean_loss,
         "last_viewspace_grad_norm": last_viewspace_grad_norm,
