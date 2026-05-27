@@ -1118,3 +1118,123 @@
 - [x] Treat degree 2/3 as supported by the same coefficient path and
   smoke-test the SPZ exportable higher-degree path; current `spz` package
   validation rejects degree 4.
+
+## Task 6.28 - 3DGS After-Training Densify/Split/Clone/Prune Plan
+- [ ] Map gsplat source behavior from:
+  - `submodules/gsplat/gsplat/strategy/default.py`
+  - `submodules/gsplat/gsplat/strategy/ops.py`
+  - `submodules/gsplat/examples/simple_trainer.py`
+- [ ] Implement the MLX equivalent of gsplat `DefaultStrategy` for the scanner
+  points trainer, scoped to 3DGS only.
+- [ ] Keep MCMC relocation/noise, 2DGS, UT, lidar, distributed packed paths,
+  sparse gradients, and visible Adam outside the first implementation.
+
+### Source Behavior To Port
+- `DefaultStrategy` keeps running state:
+  - `grad2d`: accumulated norm of image-plane gradients per Gaussian.
+  - `count`: visible-hit count per Gaussian.
+  - optional `radii`: max normalized 2D radius per Gaussian when
+    `refine_scale2d_stop_iter > 0`.
+  - `scene_scale`.
+- gsplat uses `info["means2d"].retain_grad()` before backward. In MLX this
+  must stay as an explicit `viewspace_points` dummy trainable input passed to
+  `mx.value_and_grad(..., argnums=...)`.
+- After backward and optimizer update, gsplat updates strategy state from:
+  - `viewspace_points` gradient in MLX, standing in for `means2d.grad`.
+  - `radii`, `width`, `height`, and camera count.
+  - visible Gaussian ids from dense radii masks first; packed ids can be
+    deferred.
+- Gradient normalization follows gsplat:
+  - `grad[..., 0] *= width / 2 * n_cameras`
+  - `grad[..., 1] *= height / 2 * n_cameras`
+  - accumulate `norm(grad)` into `grad2d`.
+
+### Default Thresholds From gsplat
+- `prune_opa = 0.005`
+- `grow_grad2d = 0.0002`
+- `grow_scale3d = 0.01`
+- `grow_scale2d = 0.05`
+- `prune_scale3d = 0.1`
+- `prune_scale2d = 0.15`
+- `refine_start_iter = 500`
+- `refine_stop_iter = 15000`
+- `reset_every = 3000`
+- `refine_every = 100`
+- `pause_refine_after_reset = 0`
+- `refine_scale2d_stop_iter = 0` by default, so screen-size split/prune can be
+  implemented after the first 3D scale path.
+
+### Operation Semantics
+- Clone/duplicate:
+  - Select `grad2d / count > grow_grad2d`.
+  - Require `max(exp(log_scales)) <= grow_scale3d * scene_scale`.
+  - Append copies of every trainable Gaussian parameter.
+  - Append zero optimizer state for new rows.
+  - Append duplicated running state entries.
+- Split:
+  - Select high-gradient Gaussians that are not small by the 3D scale test.
+  - Optionally include large 2D radius when `refine_scale2d_stop_iter` is
+    enabled.
+  - Replace selected Gaussians with two children.
+  - Sample child offsets from Gaussian local covariance:
+    `rotmat(normalized_quat) @ scale @ randn`.
+  - Child scales use `log(exp(parent_scale) / 1.6)`.
+  - Copy color/SH/opacity/quaternion parameters unless revised opacity is
+    explicitly added later.
+  - Reset optimizer state for children.
+- Prune:
+  - Always remove `sigmoid(opacity_logits) < prune_opa`.
+  - After `reset_every`, also remove Gaussians with
+    `max(exp(log_scales)) > prune_scale3d * scene_scale`.
+  - Optional 2D radius pruning can follow the source behavior later.
+- Opacity reset:
+  - Every `reset_every` steps, clamp opacity logits to at most
+    `logit(prune_opa * 2)`.
+  - Reset optimizer state for opacity parameters.
+
+### MLX Implementation Notes
+- Since MLX `Adam` state is tied to `nn.Module` arrays, every topology-changing
+  operation must rebuild model arrays and either:
+  - rebuild optimizers, or
+  - update optimizer state arrays with matching append/remove rows.
+- First implementation may rebuild optimizers after clone/split/prune for
+  correctness, then preserve optimizer state in a later performance pass.
+- Must support both current color modes:
+  - RGB logits: update `color_logits`.
+  - SH coefficients: update `features_dc` and `features_rest`.
+- `viewspace_points` is not a stored model parameter; it is recreated per step
+  with the current Gaussian count and only used to collect screen-space
+  gradients.
+- Topology changes must happen after optimizer updates for the step, matching
+  gsplat `simple_trainer.py`.
+
+### Implementation Slices
+- [ ] Task 6.28A: Add a small Python strategy/state object to
+  `train_scanner_points_multiview_3dgs_mlx.py` with thresholds, counters,
+  schedule flags, and summary logging only.
+- [ ] Task 6.28B: Accumulate dense 3DGS `viewspace_points` gradients into
+  `grad2d/count` and validate nonzero counts on smoke data.
+- [ ] Task 6.28C: Implement prune by opacity first because it only removes rows
+  and is easiest to validate.
+- [ ] Task 6.28D: Implement clone/duplicate for high-gradient small Gaussians.
+- [ ] Task 6.28E: Implement split for high-gradient large Gaussians with
+  quaternion-derived local random offsets and scale shrink.
+- [ ] Task 6.28F: Add opacity reset.
+- [ ] Task 6.28G: Add summary fields and preview diagnostics:
+  `num_gaussians_before/after`, `n_clone`, `n_split`, `n_prune`,
+  `n_opacity_reset`, `grad2d_mean/max`, and visible counts.
+- [ ] Task 6.28H: Add optional Makefile variables for strategy thresholds and
+  disabled-by-default refinement in smoke runs.
+
+### Validation Plan
+- Start with tiny scanner runs and force low thresholds so each operation can be
+  triggered deterministically.
+- Validate shapes after every topology change for:
+  - `means`, `quats`, `log_scales`, `opacity_logits`
+  - RGB `color_logits`
+  - SH `features_dc/features_rest`
+- Validate `viewspace_points` shape follows the updated Gaussian count on the
+  next step.
+- Validate SPZ export after topology changes for both RGB and SH modes.
+- Keep image quality expectations weak at first; the primary check is finite
+  loss, nonzero gradient stats, correct counts, and nonempty SPZ output.
