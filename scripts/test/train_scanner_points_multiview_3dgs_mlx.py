@@ -25,7 +25,6 @@ from scanner_points_alignment_render import prepare_points
 from train_scanner_random_3dgs_mlx import (
     camera_arrays,
     concat_compare,
-    evaluate_frames,
     mean_loss,
     mx_logit,
     save_frame_targets,
@@ -807,6 +806,46 @@ def render_sh_model(
     }
 
 
+def render_loss_stats(render: dict, target: mx.array) -> tuple[float, float]:
+    loss = nn.losses.l1_loss(render["render_colors"], target)
+    diff = render["render_colors"] - target
+    mse = mx.mean(diff * diff)
+    mx.eval(loss, mse, render["render_colors"], render["radii"], render["flatten_ids"])
+    loss_value = float(np.asarray(loss))
+    mse_value = float(np.asarray(mse))
+    psnr = float(-10.0 * np.log10(max(mse_value, 1.0e-12)))
+    return loss_value, psnr
+
+
+def evaluate_rgb_frames(
+    model: Tiny3DGSModel,
+    cameras,
+    targets: list[mx.array],
+    width: int,
+    height: int,
+    tile_size: int,
+) -> list[dict]:
+    stats = []
+    for camera, target in zip(cameras, targets, strict=True):
+        viewmats, Ks = camera_arrays(camera)
+        viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
+        render = render_model(model, viewspace_points, viewmats, Ks, width, height, tile_size)
+        loss, psnr = render_loss_stats(render, target)
+        radii = np.asarray(render["radii"])
+        flatten_ids = np.asarray(render["flatten_ids"])
+        stats.append(
+            {
+                "frame_index": int(camera.index),
+                "loss": loss,
+                "psnr": psnr,
+                "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
+                "intersections": int(flatten_ids.shape[0]),
+                "image": np.asarray(render["render_colors"][0], dtype=np.float32),
+            }
+        )
+    return stats
+
+
 def evaluate_sh_frames(
     model: ScannerPointsSHModel,
     cameras,
@@ -821,17 +860,14 @@ def evaluate_sh_frames(
         viewmats, Ks = camera_arrays(camera)
         viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
         render = render_sh_model(model, viewspace_points, viewmats, Ks, width, height, tile_size, sh_degree)
-        diff = render["render_colors"] - target
-        loss = mx.mean(diff * diff)
-        mx.eval(loss, render["render_colors"], render["radii"], render["flatten_ids"])
-        mse = float(np.asarray(loss))
+        loss, psnr = render_loss_stats(render, target)
         radii = np.asarray(render["radii"])
         flatten_ids = np.asarray(render["flatten_ids"])
         stats.append(
             {
                 "frame_index": int(camera.index),
-                "loss": mse,
-                "psnr": float(-10.0 * np.log10(max(mse, 1.0e-12))),
+                "loss": loss,
+                "psnr": psnr,
                 "visible_gaussians": int(np.count_nonzero(np.any(radii > 0, axis=-1))),
                 "intersections": int(flatten_ids.shape[0]),
                 "image": np.asarray(render["render_colors"][0], dtype=np.float32),
@@ -1090,7 +1126,7 @@ def main() -> None:
     save_frame_targets(args.out_dir, cameras, targets)
 
     if args.color_mode == "rgb":
-        initial_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+        initial_stats = evaluate_rgb_frames(model, cameras, targets, args.width, args.height, args.tile_size)
     else:
         initial_stats = evaluate_sh_frames(
             model,
@@ -1121,8 +1157,7 @@ def main() -> None:
     ) -> mx.array:
         local = Tiny3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
         render = render_model(local, viewspace_points, viewmats, Ks, args.width, args.height, args.tile_size)
-        diff = render["render_colors"] - target
-        return mx.mean(diff * diff), render["radii"]
+        return nn.losses.l1_loss(render["render_colors"], target), render["radii"]
 
     def sh_loss_fn(
         means: mx.array,
@@ -1154,8 +1189,7 @@ def main() -> None:
             args.tile_size,
             args.sh_degree,
         )
-        diff = render["render_colors"] - target
-        return mx.mean(diff * diff), render["radii"]
+        return nn.losses.l1_loss(render["render_colors"], target), render["radii"]
 
     rgb_grad_fn = mx.value_and_grad(rgb_loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     sh_grad_fn = mx.value_and_grad(sh_loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
@@ -1257,7 +1291,7 @@ def main() -> None:
             )
 
     if args.color_mode == "rgb":
-        final_stats = evaluate_frames(model, cameras, targets, args.width, args.height, args.tile_size)
+        final_stats = evaluate_rgb_frames(model, cameras, targets, args.width, args.height, args.tile_size)
     else:
         final_stats = evaluate_sh_frames(
             model,
@@ -1335,6 +1369,8 @@ def main() -> None:
         "random_gaussian_bounds_scale": args.random_gaussian_bounds_scale,
         "frames": len(cameras),
         "steps": args.steps,
+        "loss_function": "mlx.nn.losses.l1_loss",
+        "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
         "initial_mean_loss": initial_mean_loss,
         "final_mean_loss": final_mean_loss,
         "last_viewspace_grad_norm": last_viewspace_grad_norm,
