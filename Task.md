@@ -816,8 +816,7 @@
   request is supported by the first-pass Metal backward path:
   dense covars and pinhole camera.
 - [x] Keep CPU/reference routing for unsupported projection backward cases:
-  quats/scales path, non-pinhole cameras, packed paths, and future distortion
-  variants.
+  non-pinhole cameras, packed paths, and future distortion variants.
 - [x] Validate projection autograd smoke with `v_means`, `v_covars`, and
   `viewspace_points` gradients.
 - [x] Validate dense training smoke without adding extra `mx::eval(...)` inside
@@ -828,10 +827,10 @@
 - [x] Add `make codex-projection-guardrails`.
 - [x] Verify the supported full-GPU projection VJP boundary:
   dense covars, pinhole camera, and nonzero `v_means`, `v_covars`,
-  `v_viewmats`, and `viewspace_points` gradients.
+  `v_quats`, `v_scales`, `v_viewmats`, and `viewspace_points` gradients.
 - [x] Report unsupported or fallback projection VJP cases explicitly:
-  quat/scale projection backward, packed projection, non-pinhole cameras, `Ks`,
-  opacities, and distortion paths.
+  packed projection, non-pinhole cameras, `Ks`, opacities, and distortion
+  paths.
 - [x] Keep unsupported fallback diagnostics separate from full-GPU acceptance.
 
 ## Task 6.14 - Projection Backward `v_viewmats` GPU Path
@@ -845,3 +844,15 @@
 - [x] Extend C++/Xcode smoke to compare GPU `v_viewmats` against CPU reference.
 - [x] Update projection VJP guardrails so `v_viewmats` is part of the supported
   dense covars + pinhole full-GPU boundary.
+
+## Task 6.15 - Projection Backward Quat/Scale GPU Path
+- [x] Add analytic quaternion/scale covariance VJP helpers to projection Metal.
+- [x] Support `use_covars=false` in
+  `GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(...)`.
+- [x] Route projection `vjp(...)` through same-stream GPU backward for both
+  dense covars and quats/scales when `camera_model == pinhole`.
+- [x] Extend C++/Xcode smoke to compare GPU `v_quats` and `v_scales` against
+  CPU reference.
+- [x] Extend Python autograd smoke with projection quats/scales gradients.
+- [x] Update projection VJP guardrails so quats/scales are part of supported
+  dense fused pinhole full-GPU coverage.

@@ -67,6 +67,58 @@ inline float3x3 covar_from_quat_scale(float4 quat, float3 scale) {
   return m * transpose(m);
 }
 
+inline float4 quat_to_rotmat_vjp(float4 quat, float3x3 v_R) {
+  float w = quat.x;
+  float x = quat.y;
+  float y = quat.z;
+  float z = quat.w;
+  float inv_norm = rsqrt(w * w + x * x + y * y + z * z);
+  w *= inv_norm;
+  x *= inv_norm;
+  y *= inv_norm;
+  z *= inv_norm;
+
+  float g[9] = {
+      v_R[0][0], v_R[1][0], v_R[2][0],
+      v_R[0][1], v_R[1][1], v_R[2][1],
+      v_R[0][2], v_R[1][2], v_R[2][2],
+  };
+  float4 v_quat_n = float4(
+      2.0f * (x * (g[7] - g[5]) + y * (g[2] - g[6]) +
+              z * (g[3] - g[1])),
+      2.0f * (-2.0f * x * (g[4] + g[8]) + y * (g[1] + g[3]) +
+              z * (g[2] + g[6]) + w * (g[7] - g[5])),
+      2.0f * (x * (g[1] + g[3]) - 2.0f * y * (g[0] + g[8]) +
+              z * (g[5] + g[7]) + w * (g[2] - g[6])),
+      2.0f * (x * (g[2] + g[6]) + y * (g[5] + g[7]) -
+              2.0f * z * (g[0] + g[4]) + w * (g[3] - g[1])));
+  float4 quat_n = float4(w, x, y, z);
+  float dot_vq_q = dot(v_quat_n, quat_n);
+  return (v_quat_n - dot_vq_q * quat_n) * inv_norm;
+}
+
+inline void quat_scale_to_covar_vjp(float4 quat,
+                                    float3 scale,
+                                    float3x3 v_covar,
+                                    thread float4& v_quat,
+                                    thread float3& v_scale) {
+  float3x3 R = quat_to_rotmat(quat);
+  float3x3 M = float3x3(
+      R[0] * scale.x,
+      R[1] * scale.y,
+      R[2] * scale.z);
+  float3x3 v_covar_sym = v_covar + transpose(v_covar);
+  float3x3 v_M = v_covar_sym * M;
+  float3x3 v_R = float3x3(
+      v_M[0] * scale.x,
+      v_M[1] * scale.y,
+      v_M[2] * scale.z);
+  v_scale.x += dot(v_M[0], R[0]);
+  v_scale.y += dot(v_M[1], R[1]);
+  v_scale.z += dot(v_M[2], R[2]);
+  v_quat += quat_to_rotmat_vjp(quat, v_R);
+}
+
 inline void persp_proj(float3 mean3d,
                        float3x3 cov3d,
                        float fx,
@@ -395,17 +447,21 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
     constant ProjectionKernelParams& params [[buffer(0)]],
     const device float* means [[buffer(1)]],
     const device float* covars [[buffer(2)]],
-    const device float* viewmats [[buffer(3)]],
-    const device float* Ks [[buffer(4)]],
-    const device int* radii [[buffer(5)]],
-    const device float* conics [[buffer(6)]],
-    const device float* compensations [[buffer(7)]],
-    const device float* v_means2d [[buffer(8)]],
-    const device float* v_depths [[buffer(9)]],
-    const device float* v_conics [[buffer(10)]],
-    const device float* v_compensations [[buffer(11)]],
-    device float* v_means [[buffer(12)]],
-    device float* v_covars [[buffer(13)]],
+    const device float* quats [[buffer(3)]],
+    const device float* scales [[buffer(4)]],
+    const device float* viewmats [[buffer(5)]],
+    const device float* Ks [[buffer(6)]],
+    const device int* radii [[buffer(7)]],
+    const device float* conics [[buffer(8)]],
+    const device float* compensations [[buffer(9)]],
+    const device float* v_means2d [[buffer(10)]],
+    const device float* v_depths [[buffer(11)]],
+    const device float* v_conics [[buffer(12)]],
+    const device float* v_compensations [[buffer(13)]],
+    device float* v_means [[buffer(14)]],
+    device float* v_covars [[buffer(15)]],
+    device float* v_quats [[buffer(16)]],
+    device float* v_scales [[buffer(17)]],
     uint gaussian_idx [[thread_position_in_grid]]) {
   if (gaussian_idx >= params.B * params.N) {
     return;
@@ -415,9 +471,19 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
   uint gid = gaussian_idx % params.N;
   uint mean_off = bid * params.N * 3 + gid * 3;
   uint cov_off = bid * params.N * 6 + gid * 6;
+  uint quat_off = bid * params.N * 4 + gid * 4;
+  uint scale_off = bid * params.N * 3 + gid * 3;
   float3 mean_w = float3(means[mean_off], means[mean_off + 1], means[mean_off + 2]);
   float3 v_mean_w_total = float3(0.0f);
   float3x3 v_covar_w_total = float3x3(float3(0.0f), float3(0.0f), float3(0.0f));
+  float4 quat = float4(0.0f);
+  float3 scale = float3(0.0f);
+  if (params.use_covars == 0) {
+    quat = float4(quats[quat_off], quats[quat_off + 1],
+                  quats[quat_off + 2], quats[quat_off + 3]);
+    scale = float3(scales[scale_off], scales[scale_off + 1],
+                   scales[scale_off + 2]);
+  }
 
   for (uint cid = 0; cid < params.C; ++cid) {
     uint idx = (bid * params.C + cid) * params.N + gid;
@@ -433,10 +499,15 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
         float3(viewmats[view_off + 2], viewmats[view_off + 6], viewmats[view_off + 10]));
     float3 t = float3(viewmats[view_off + 3], viewmats[view_off + 7], viewmats[view_off + 11]);
     float3 mean_c = R * mean_w + t;
-    float3x3 covar_w = float3x3(
-        float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
-        float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
-        float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    float3x3 covar_w;
+    if (params.use_covars != 0) {
+      covar_w = float3x3(
+          float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
+          float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
+          float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    } else {
+      covar_w = covar_from_quat_scale(quat, scale);
+    }
     float3x3 covar_c = R * covar_w * transpose(R);
 
     float c0 = conics[idx * 3];
@@ -476,28 +547,43 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
   v_means[mean_off] = v_mean_w_total.x;
   v_means[mean_off + 1] = v_mean_w_total.y;
   v_means[mean_off + 2] = v_mean_w_total.z;
-  v_covars[cov_off] = v_covar_w_total[0][0];
-  v_covars[cov_off + 1] = v_covar_w_total[1][0] + v_covar_w_total[0][1];
-  v_covars[cov_off + 2] = v_covar_w_total[2][0] + v_covar_w_total[0][2];
-  v_covars[cov_off + 3] = v_covar_w_total[1][1];
-  v_covars[cov_off + 4] = v_covar_w_total[2][1] + v_covar_w_total[1][2];
-  v_covars[cov_off + 5] = v_covar_w_total[2][2];
+  if (params.use_covars != 0) {
+    v_covars[cov_off] = v_covar_w_total[0][0];
+    v_covars[cov_off + 1] = v_covar_w_total[1][0] + v_covar_w_total[0][1];
+    v_covars[cov_off + 2] = v_covar_w_total[2][0] + v_covar_w_total[0][2];
+    v_covars[cov_off + 3] = v_covar_w_total[1][1];
+    v_covars[cov_off + 4] = v_covar_w_total[2][1] + v_covar_w_total[1][2];
+    v_covars[cov_off + 5] = v_covar_w_total[2][2];
+  } else {
+    float4 v_quat = float4(0.0f);
+    float3 v_scale = float3(0.0f);
+    quat_scale_to_covar_vjp(quat, scale, v_covar_w_total, v_quat, v_scale);
+    v_quats[quat_off] = v_quat.x;
+    v_quats[quat_off + 1] = v_quat.y;
+    v_quats[quat_off + 2] = v_quat.z;
+    v_quats[quat_off + 3] = v_quat.w;
+    v_scales[scale_off] = v_scale.x;
+    v_scales[scale_off + 1] = v_scale.y;
+    v_scales[scale_off + 2] = v_scale.z;
+  }
 }
 
 kernel void gsplat_projection_ewa_3dgs_fused_backward_viewmats_kernel(
     constant ProjectionKernelParams& params [[buffer(0)]],
     const device float* means [[buffer(1)]],
     const device float* covars [[buffer(2)]],
-    const device float* viewmats [[buffer(3)]],
-    const device float* Ks [[buffer(4)]],
-    const device int* radii [[buffer(5)]],
-    const device float* conics [[buffer(6)]],
-    const device float* compensations [[buffer(7)]],
-    const device float* v_means2d [[buffer(8)]],
-    const device float* v_depths [[buffer(9)]],
-    const device float* v_conics [[buffer(10)]],
-    const device float* v_compensations [[buffer(11)]],
-    device float* v_viewmats [[buffer(12)]],
+    const device float* quats [[buffer(3)]],
+    const device float* scales [[buffer(4)]],
+    const device float* viewmats [[buffer(5)]],
+    const device float* Ks [[buffer(6)]],
+    const device int* radii [[buffer(7)]],
+    const device float* conics [[buffer(8)]],
+    const device float* compensations [[buffer(9)]],
+    const device float* v_means2d [[buffer(10)]],
+    const device float* v_depths [[buffer(11)]],
+    const device float* v_conics [[buffer(12)]],
+    const device float* v_compensations [[buffer(13)]],
+    device float* v_viewmats [[buffer(14)]],
     uint camera_idx [[thread_position_in_grid]]) {
   if (camera_idx >= params.B * params.C) {
     return;
@@ -524,12 +610,23 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_viewmats_kernel(
 
     uint mean_off = bid * params.N * 3 + gid * 3;
     uint cov_off = bid * params.N * 6 + gid * 6;
+    uint quat_off = bid * params.N * 4 + gid * 4;
+    uint scale_off = bid * params.N * 3 + gid * 3;
     float3 mean_w = float3(means[mean_off], means[mean_off + 1], means[mean_off + 2]);
     float3 mean_c = R * mean_w + t;
-    float3x3 covar_w = float3x3(
-        float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
-        float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
-        float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    float3x3 covar_w;
+    if (params.use_covars != 0) {
+      covar_w = float3x3(
+          float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
+          float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
+          float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    } else {
+      float4 quat = float4(quats[quat_off], quats[quat_off + 1],
+                           quats[quat_off + 2], quats[quat_off + 3]);
+      float3 scale = float3(scales[scale_off], scales[scale_off + 1],
+                            scales[scale_off + 2]);
+      covar_w = covar_from_quat_scale(quat, scale);
+    }
     float3x3 covar_c = R * covar_w * transpose(R);
 
     float c0 = conics[idx * 3];

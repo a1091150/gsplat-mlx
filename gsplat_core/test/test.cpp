@@ -566,6 +566,87 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
                  "projection backward GPU v_viewmats");
   }
 
+  mx::array quats(
+      {1.0f, 0.1f, 0.2f, -0.1f,
+       0.9f, -0.2f, 0.1f, 0.3f},
+      {1, 2, 4},
+      mx::float32);
+  mx::array scales(
+      {0.22f, 0.26f, 0.3f,
+       0.18f, 0.24f, 0.29f},
+      {1, 2, 3},
+      mx::float32);
+  gsplat_core::ProjectionEWA3DGSFusedParams quat_fwd_params = fwd_params;
+  quat_fwd_params.use_covars = false;
+  gsplat_core::ProjectionEWA3DGSFusedInput quat_fwd_input = {
+      .means = means,
+      .covars = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .quats = quats,
+      .scales = scales,
+      .opacities = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .viewspace_points = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .s = mx::Device::cpu,
+      .params = quat_fwd_params,
+  };
+  std::vector<mx::array> quat_fwd =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(quat_fwd_input);
+  gsplat_core::ProjectionEWA3DGSFusedParams quat_bwd_params = quat_fwd_params;
+  quat_bwd_params.near_plane = -1.0e20f;
+  quat_bwd_params.far_plane = 1.0e20f;
+  gsplat_core::ProjectionEWA3DGSFusedBackwardInput quat_bwd_input = {
+      .means = means,
+      .covars = mx::zeros({0}, mx::float32, mx::Device::cpu),
+      .quats = quats,
+      .scales = scales,
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .radii = radii,
+      .conics = quat_fwd[gsplat_core::kConics],
+      .compensations = quat_fwd[gsplat_core::kCompensations],
+      .v_means2d = v_means2d,
+      .v_depths = v_depths,
+      .v_conics = v_conics,
+      .v_compensations = v_compensations,
+      .s = mx::Device::cpu,
+      .params = quat_bwd_params,
+      .viewmats_requires_grad = true,
+  };
+  std::vector<mx::array> quat_cpu_outputs =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(quat_bwd_input);
+  gsplat_core::ProjectionEWA3DGSFusedBackwardInput quat_gpu_bwd_input =
+      quat_bwd_input;
+  quat_gpu_bwd_input.s = mx::Device::gpu;
+  std::vector<mx::array> quat_gpu_outputs =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(quat_gpu_bwd_input);
+  mx::eval(quat_cpu_outputs);
+  mx::eval(quat_gpu_outputs);
+  const float* cpu_v_quats =
+      quat_cpu_outputs[gsplat_core::kProjectionVQuats].data<float>();
+  const float* gpu_v_quats =
+      quat_gpu_outputs[gsplat_core::kProjectionVQuats].data<float>();
+  const float* cpu_v_scales =
+      quat_cpu_outputs[gsplat_core::kProjectionVScales].data<float>();
+  const float* gpu_v_scales =
+      quat_gpu_outputs[gsplat_core::kProjectionVScales].data<float>();
+  const float* quat_cpu_v_viewmats =
+      quat_cpu_outputs[gsplat_core::kProjectionVViewmats].data<float>();
+  const float* quat_gpu_v_viewmats =
+      quat_gpu_outputs[gsplat_core::kProjectionVViewmats].data<float>();
+  for (int i = 0; i < 8; ++i) {
+    expect_close(gpu_v_quats[i], cpu_v_quats[i], 2.0e-2f,
+                 "projection backward GPU v_quats");
+  }
+  for (int i = 0; i < 6; ++i) {
+    expect_close(gpu_v_scales[i], cpu_v_scales[i], 2.0e-2f,
+                 "projection backward GPU v_scales");
+  }
+  for (int i = 0; i < 16; ++i) {
+    expect_close(quat_gpu_v_viewmats[i], quat_cpu_v_viewmats[i], 1.0e-1f,
+                 "projection backward GPU quat path v_viewmats");
+  }
+
   std::cout << "projection_ewa_3dgs_fused backward reference smoke ok\n";
 }
 

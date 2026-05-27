@@ -33,6 +33,7 @@ supports the request:
 
 ```text
 use_covars = true
+or quats/scales input
 camera_model = pinhole
 ```
 
@@ -59,7 +60,7 @@ forward and projection backward on the same GPU stream and avoid explicit
 
 ## Full GPU status
 
-The first-pass implementation now exists for the dense pinhole covars path:
+The current implementation now covers the dense fused pinhole path:
 
 ```text
 GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(...)
@@ -70,10 +71,13 @@ It supports:
 
 ```text
 use_covars = true
+or quats/scales input
 camera_model = pinhole
 calc_compensations = true/false
 v_means
 v_covars
+v_quats
+v_scales
 v_viewmats
 ```
 
@@ -84,7 +88,7 @@ reduction semantics but assigns one thread per `(batch, camera)` and loops over
 gaussians, which avoids relying on floating-point atomics while parity is being
 locked down.
 
-`GSPlatProjectionEWA3DGSFused::vjp(...)` now routes the supported dense covars
+`GSPlatProjectionEWA3DGSFused::vjp(...)` now routes the supported dense fused
 pinhole path to `stream()`. The projection autograd and dense training smoke
 checks pass without extra `mx::eval(...)` materialization in the `vjp(...)`
 layer.
@@ -117,10 +121,13 @@ Supported:
 
 ```text
 dense covars input
+quat/scale input
 pinhole camera_model = 0
 calc_compensations = true/false
 v_means
 v_covars
+v_quats
+v_scales
 v_viewmats
 viewspace_points gradient proxy
 ```
@@ -128,7 +135,6 @@ viewspace_points gradient proxy
 Fallback or not implemented:
 
 ```text
-quat/scale projection VJP
 non-pinhole cameras
 packed projection
 Ks gradients
@@ -140,29 +146,31 @@ Use `scripts/test/projection_vjp_guardrails.py` or
 `make codex-projection-guardrails` to verify the supported boundary and print
 the expected limitations.
 
-## Recommended implementation slice
+## Completed implementation slice
 
-Start with dense pinhole covars path only:
+Dense fused pinhole projection backward currently supports:
 
 ```text
 camera_model = pinhole
 use_covars = true
+or quats/scales input
 calc_compensations = true/false
 packed = false
 ```
 
-First GPU outputs:
+GPU outputs:
 
 ```text
 v_means
 v_covars
-```
-
-Next outputs after dense covars GPU path parity is stable:
-
-```text
 v_quats
 v_scales
+```
+
+Next outputs after dense fused GPU path parity is stable:
+
+```text
+packed projection
 ```
 
 Keep these out of the first GPU slice:

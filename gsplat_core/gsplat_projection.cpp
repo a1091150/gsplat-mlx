@@ -732,10 +732,6 @@ void GSPlatProjectionEWA3DGSFused::eval_gpu(
 void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
     const std::vector<mx::array>& inputs,
     std::vector<mx::array>& outputs) {
-  if (!params_.use_covars) {
-    throw std::runtime_error(
-        "GSPlatProjectionEWA3DGSFusedBackward GPU path currently supports covars only.");
-  }
   if (params_.camera_model != 0) {
     throw std::runtime_error(
         "GSPlatProjectionEWA3DGSFusedBackward GPU path currently supports pinhole only.");
@@ -747,6 +743,8 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
 
   const auto& means = inputs[0];
   const auto& covars = inputs[1];
+  const auto& quats = inputs[2];
+  const auto& scales = inputs[3];
   const auto& viewmats = inputs[4];
   const auto& Ks = inputs[5];
   const auto& radii = inputs[6];
@@ -759,6 +757,8 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
 
   auto& v_means = outputs[kProjectionVMeans];
   auto& v_covars = outputs[kProjectionVCovars];
+  auto& v_quats = outputs[kProjectionVQuats];
+  auto& v_scales = outputs[kProjectionVScales];
   auto& v_viewmats = outputs[kProjectionVViewmats];
 
   const int means_ndim = static_cast<int>(means.ndim());
@@ -798,17 +798,21 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
   compute_encoder.set_bytes(kernel_params, 0);
   compute_encoder.set_input_array(means, 1);
   compute_encoder.set_input_array(covars, 2);
-  compute_encoder.set_input_array(viewmats, 3);
-  compute_encoder.set_input_array(Ks, 4);
-  compute_encoder.set_input_array(radii, 5);
-  compute_encoder.set_input_array(conics, 6);
-  compute_encoder.set_input_array(compensations, 7);
-  compute_encoder.set_input_array(v_means2d, 8);
-  compute_encoder.set_input_array(v_depths, 9);
-  compute_encoder.set_input_array(v_conics, 10);
-  compute_encoder.set_input_array(v_compensations, 11);
-  compute_encoder.set_output_array(v_means, 12);
-  compute_encoder.set_output_array(v_covars, 13);
+  compute_encoder.set_input_array(quats, 3);
+  compute_encoder.set_input_array(scales, 4);
+  compute_encoder.set_input_array(viewmats, 5);
+  compute_encoder.set_input_array(Ks, 6);
+  compute_encoder.set_input_array(radii, 7);
+  compute_encoder.set_input_array(conics, 8);
+  compute_encoder.set_input_array(compensations, 9);
+  compute_encoder.set_input_array(v_means2d, 10);
+  compute_encoder.set_input_array(v_depths, 11);
+  compute_encoder.set_input_array(v_conics, 12);
+  compute_encoder.set_input_array(v_compensations, 13);
+  compute_encoder.set_output_array(v_means, 14);
+  compute_encoder.set_output_array(v_covars, 15);
+  compute_encoder.set_output_array(v_quats, 16);
+  compute_encoder.set_output_array(v_scales, 17);
 
   const size_t max_threads = kernel->maxTotalThreadsPerThreadgroup();
   const size_t tgp_size = std::min(static_cast<size_t>(numel), max_threads);
@@ -827,16 +831,18 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
     compute_encoder.set_bytes(kernel_params, 0);
     compute_encoder.set_input_array(means, 1);
     compute_encoder.set_input_array(covars, 2);
-    compute_encoder.set_input_array(viewmats, 3);
-    compute_encoder.set_input_array(Ks, 4);
-    compute_encoder.set_input_array(radii, 5);
-    compute_encoder.set_input_array(conics, 6);
-    compute_encoder.set_input_array(compensations, 7);
-    compute_encoder.set_input_array(v_means2d, 8);
-    compute_encoder.set_input_array(v_depths, 9);
-    compute_encoder.set_input_array(v_conics, 10);
-    compute_encoder.set_input_array(v_compensations, 11);
-    compute_encoder.set_output_array(v_viewmats, 12);
+    compute_encoder.set_input_array(quats, 3);
+    compute_encoder.set_input_array(scales, 4);
+    compute_encoder.set_input_array(viewmats, 5);
+    compute_encoder.set_input_array(Ks, 6);
+    compute_encoder.set_input_array(radii, 7);
+    compute_encoder.set_input_array(conics, 8);
+    compute_encoder.set_input_array(compensations, 9);
+    compute_encoder.set_input_array(v_means2d, 10);
+    compute_encoder.set_input_array(v_depths, 11);
+    compute_encoder.set_input_array(v_conics, 12);
+    compute_encoder.set_input_array(v_compensations, 13);
+    compute_encoder.set_output_array(v_viewmats, 14);
 
     const size_t viewmat_max_threads =
         viewmat_kernel->maxTotalThreadsPerThreadgroup();
@@ -1142,7 +1148,7 @@ std::vector<mx::array> GSPlatProjectionEWA3DGSFused::vjp(
 
   const bool needs_viewmats =
       std::find(argnums.begin(), argnums.end(), 5) != argnums.end();
-  const bool use_gpu_backward = params_.use_covars && params_.camera_model == 0;
+  const bool use_gpu_backward = params_.camera_model == 0;
   mx::StreamOrDevice backward_stream = mx::Device::cpu;
   if (use_gpu_backward) {
     backward_stream = stream();

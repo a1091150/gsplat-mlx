@@ -176,11 +176,90 @@ def test_projection_vjp():
     assert_nonzero("projection v_viewspace_points", grads[2])
 
 
+def test_projection_quat_scale_vjp():
+    means = mx.array(
+        [[[0.1, -0.05, 2.0], [0.25, 0.15, 3.0]]],
+        dtype=mx.float32,
+    )
+    quats = mx.array(
+        [[[1.0, 0.1, 0.2, -0.1], [0.9, -0.2, 0.1, 0.3]]],
+        dtype=mx.float32,
+    )
+    scales = mx.array(
+        [[[0.22, 0.26, 0.3], [0.18, 0.24, 0.29]]],
+        dtype=mx.float32,
+    )
+    viewspace_points = mx.zeros((1, 1, 2, 2), dtype=mx.float32)
+    viewmats = mx.array(
+        [[[[1.0, 0.0, 0.0, 0.0],
+           [0.0, 1.0, 0.0, 0.0],
+           [0.0, 0.0, 1.0, 0.0],
+           [0.0, 0.0, 0.0, 1.0]]]],
+        dtype=mx.float32,
+    )
+    Ks = mx.array(
+        [[[[90.0, 0.0, 32.0],
+           [0.0, 88.0, 24.0],
+           [0.0, 0.0, 1.0]]]],
+        dtype=mx.float32,
+    )
+
+    def loss_fn(means_arg, quats_arg, scales_arg, viewmats_arg, viewspace_points_arg):
+        outputs = projection_ewa_3dgs_fused_forward(
+            {
+                "means": means_arg,
+                "quats": quats_arg,
+                "scales": scales_arg,
+                "viewmats": viewmats_arg,
+                "Ks": Ks,
+                "viewspace_points": viewspace_points_arg,
+            },
+            image_width=64,
+            image_height=48,
+            eps2d=0.3,
+            near_plane=0.01,
+            far_plane=100.0,
+            radius_clip=0.0,
+            calc_compensations=True,
+            camera_model=0,
+        )
+        return (
+            mx.sum(outputs["means2d"])
+            + 0.25 * mx.sum(outputs["depths"])
+            + 0.1 * mx.sum(outputs["conics"])
+            + 0.5 * mx.sum(outputs["compensations"])
+        )
+
+    loss, grads = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4))(
+        means,
+        quats,
+        scales,
+        viewmats,
+        viewspace_points,
+    )
+    mx.eval(loss, *grads)
+    assert_shape("projection quat path v_means", grads[0], means.shape)
+    assert_shape("projection quat path v_quats", grads[1], quats.shape)
+    assert_shape("projection quat path v_scales", grads[2], scales.shape)
+    assert_shape("projection quat path v_viewmats", grads[3], viewmats.shape)
+    assert_shape(
+        "projection quat path v_viewspace_points",
+        grads[4],
+        viewspace_points.shape,
+    )
+    assert_nonzero("projection quat path v_means", grads[0])
+    assert_nonzero("projection quat path v_quats", grads[1])
+    assert_nonzero("projection quat path v_scales", grads[2])
+    assert_nonzero("projection quat path v_viewmats", grads[3])
+    assert_nonzero("projection quat path v_viewspace_points", grads[4])
+
+
 def main():
     test_spherical_harmonics_vjp()
     test_quat_scale_vjp()
     test_rasterize_vjp()
     test_projection_vjp()
+    test_projection_quat_scale_vjp()
     print("autograd vjp smoke ok")
 
 

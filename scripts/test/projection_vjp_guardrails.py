@@ -7,12 +7,13 @@ projection_ewa_3dgs_fused_forward = smoke.projection_ewa_3dgs_fused_forward
 
 EXPECTED_FULL_GPU_SUPPORT = (
     "dense covars input",
+    "quat/scale input",
     "pinhole camera_model=0",
     "v_means, v_covars, v_viewmats, and viewspace_points gradients",
+    "v_quats and v_scales gradients",
 )
 
 EXPECTED_LIMITATIONS = (
-    "quat/scale projection VJP still uses CPU/reference routing",
     "non-pinhole cameras are not supported by projection backward",
     "packed projection is not implemented in gsplat_core yet",
     "Ks and opacity gradients are intentionally out of scope",
@@ -170,6 +171,7 @@ def check_supported_full_gpu_viewmats_vjp() -> None:
 def main() -> None:
     check_supported_full_gpu_vjp()
     check_supported_full_gpu_viewmats_vjp()
+    smoke.test_projection_quat_scale_vjp()
 
     print("projection vjp guardrails ok")
     print("full GPU support:")
