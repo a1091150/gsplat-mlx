@@ -888,3 +888,20 @@
   `make codex-training-smoke`, and `make codex-projection-guardrails`.
 - [ ] Add a larger training smoke that uses backgrounds, masks, or multi-camera
   batches after the dense single-camera path remains stable.
+
+## Task 6.18 - Minimal Python MLX Training Example
+- [x] Add `scripts/test/train_tiny_3dgs_mlx.py`.
+- [x] Use `mlx.nn.Module` to hold tiny trainable 3DGS parameters:
+  means, quats, log-scales, color logits, and opacity logits.
+- [x] Use separate `mlx.optimizers.Adam` instances for the parameter groups so
+  future trainer code can tune learning rates per group.
+- [x] Use `mx.value_and_grad(..., argnums=(0, 1, 2, 3, 4, 5))` and pass
+  `viewspace_points` as the dummy trainable proxy argument.
+- [x] Render through the current full dense forward path:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [x] Stop gradients through discrete `tile_offsets` and `flatten_ids`.
+- [x] Generate a small synthetic RGB target image with numpy and save target,
+  initial render, and final render PNGs.
+- [x] Add `make codex-tiny-train` for the manual tiny trainer.
+- [ ] Extend the tiny trainer with optional external image input after the
+  generated-image path stays stable.
