@@ -9,6 +9,9 @@ RANDOM_3DGS_WIDTH ?= 512
 RANDOM_3DGS_HEIGHT ?= 512
 TINY_TRAIN_OUT ?= outputs/tiny_3dgs_train
 TINY_TRAIN_STEPS ?= 40
+TINY_TRAIN_N ?= 1024
+TINY_TRAIN_WIDTH ?= 512
+TINY_TRAIN_HEIGHT ?= 512
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
 .PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-projection-guardrails clean
@@ -91,7 +94,10 @@ codex-dense-training-smoke:
 codex-tiny-train:
 	conda run -n $(CONDA_ENV) python scripts/test/train_tiny_3dgs_mlx.py \
 		--out-dir "$(TINY_TRAIN_OUT)" \
-		--steps $(TINY_TRAIN_STEPS)
+		--steps $(TINY_TRAIN_STEPS) \
+		--num-gaussians $(TINY_TRAIN_N) \
+		--width $(TINY_TRAIN_WIDTH) \
+		--height $(TINY_TRAIN_HEIGHT)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

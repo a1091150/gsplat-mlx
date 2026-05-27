@@ -905,3 +905,47 @@
 - [x] Add `make codex-tiny-train` for the manual tiny trainer.
 - [ ] Extend the tiny trainer with optional external image input after the
   generated-image path stays stable.
+
+## Task 6.19 - Tiny Multi-View Training Smoke
+- [ ] Extend `scripts/test/train_tiny_3dgs_mlx.py` with a small multi-view
+  training mode.
+- [ ] Generate multiple synthetic pinhole cameras that share one Gaussian set
+  but use different `viewmats`, `Ks`, and target images.
+- [ ] Keep the first version dense, single-scene, pinhole-only, and
+  quats/scales-based.
+- [ ] Train by cycling or sampling one view per step while all views update the
+  same `Tiny3DGSModel` parameters.
+- [ ] Keep `viewspace_points` as an explicit dummy trainable proxy argument for
+  each selected view.
+- [ ] Render every view through:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [ ] Continue to stop gradients through discrete `tile_offsets` and
+  `flatten_ids`.
+- [ ] Save target, initial, and final preview PNGs per view, such as
+  `target_view_00.png`, `step_0000_view_00.png`, and
+  `step_0040_view_00.png`.
+- [ ] Add a Makefile entry or variables for multi-view smoke once the script
+  option is stable.
+- [ ] Validate that multi-view loss is finite and does not diverge on a short
+  run.
+
+## Task 6.20 - Tiny Trainer SPZ Export
+- [ ] Add optional SPZ export after the tiny trainer has a stable single-view
+  and multi-view path.
+- [ ] Keep SPZ export separate from Task 6.19 so camera/loss behavior and file
+  format behavior can be debugged independently.
+- [ ] Detect whether the `spz` Python package is available in the
+  `fastgs_core` conda environment and report a clear skip/error if missing.
+- [ ] Export trained Gaussian attributes:
+  means, log-scales or scales in the expected SPZ convention, normalized
+  quaternions, sigmoid opacities, and color data.
+- [ ] Decide and document the color convention for the first exporter:
+  direct RGB-to-SH degree 0 or an explicitly marked RGB approximation.
+- [ ] Decide and document quaternion order and coordinate-system assumptions
+  before treating the exported file as viewer-compatible.
+- [ ] Add a `--save-spz` or similar CLI flag to
+  `scripts/test/train_tiny_3dgs_mlx.py`.
+- [ ] Add a Makefile variable for optional SPZ export after the CLI flag is
+  validated.
+- [ ] Validate that the exporter writes a nonempty `.spz` file and that the
+  training path still works when export is disabled.
