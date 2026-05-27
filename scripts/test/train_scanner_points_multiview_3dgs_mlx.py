@@ -1017,6 +1017,95 @@ def export_trained_spz(
     return int(means.shape[0])
 
 
+def array_min_mean_max(values: np.ndarray) -> dict:
+    flat = np.asarray(values, dtype=np.float32).reshape(-1)
+    if flat.size == 0:
+        return {"min": None, "mean": None, "max": None}
+    return {
+        "min": float(flat.min()),
+        "mean": float(flat.mean()),
+        "max": float(flat.max()),
+    }
+
+
+def vector_axis_min_max(values: np.ndarray) -> dict:
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return {"min": [], "max": []}
+    return {
+        "min": values.min(axis=0).astype(float).tolist(),
+        "max": values.max(axis=0).astype(float).tolist(),
+    }
+
+
+def spz_export_diagnostics(
+    model: Tiny3DGSModel | ScannerPointsSHModel,
+    color_mode: str,
+    sh_degree: int,
+) -> dict:
+    if color_mode == "rgb":
+        mx.eval(model.means, model.log_scales, model.normalized_quats, model.color_logits, model.opacity_logits)
+    else:
+        mx.eval(
+            model.means,
+            model.log_scales,
+            model.normalized_quats,
+            model.features_dc,
+            model.features_rest,
+            model.opacity_logits,
+        )
+
+    means = np.asarray(model.means[0], dtype=np.float32)
+    spz_positions = positions_to_spz(means)
+    log_scales = np.asarray(model.log_scales[0], dtype=np.float32)
+    quats = np.asarray(model.normalized_quats[0], dtype=np.float32)
+    spz_quats = quats_to_spz(quats)
+    opacity_logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
+    opacities = 1.0 / (1.0 + np.exp(-opacity_logits))
+
+    diagnostics = {
+        "axis_mode": "scanner",
+        "position_convention": "[x, -z, y]",
+        "rotation_convention": "trained wxyz quats transformed by scanner axis3",
+        "scale_convention": "trained log_scales",
+        "opacity_convention": "trained opacity logits",
+        "gaussian_count": int(means.shape[0]),
+        "trained_position_min_max": vector_axis_min_max(means),
+        "spz_position_min_max": vector_axis_min_max(spz_positions),
+        "log_scale": array_min_mean_max(log_scales),
+        "scale": array_min_mean_max(np.exp(log_scales)),
+        "opacity_logit": array_min_mean_max(opacity_logits),
+        "opacity": array_min_mean_max(opacities),
+        "trained_quat_norm": array_min_mean_max(np.linalg.norm(quats, axis=-1)),
+        "spz_quat_norm": array_min_mean_max(np.linalg.norm(spz_quats, axis=-1)),
+        "color_mode": color_mode,
+        "sh_degree": int(sh_degree) if color_mode == "sh" else 0,
+    }
+    if color_mode == "rgb":
+        colors = np.asarray(model.colors[0, 0], dtype=np.float32)
+        diagnostics.update(
+            {
+                "colors_shape": list(colors.shape),
+                "colors_min_max": vector_axis_min_max(np.clip(colors, 0.0, 1.0)),
+                "sh_shape": [0],
+            }
+        )
+    else:
+        features_dc = np.asarray(model.features_dc[0], dtype=np.float32)
+        active_rest = sh_coeff_count(sh_degree) - 1
+        features_rest = np.asarray(model.features_rest[0, :, :active_rest, :], dtype=np.float32)
+        diagnostics.update(
+            {
+                "features_dc_shape": list(features_dc.shape),
+                "features_dc_min_max": vector_axis_min_max(features_dc),
+                "features_rest_shape": list(features_rest.shape),
+                "features_rest": array_min_mean_max(features_rest),
+                "active_rest_coefficients": int(active_rest),
+            }
+        )
+    return diagnostics
+
+
 def opacity_diagnostics(model: Tiny3DGSModel | ScannerPointsSHModel) -> dict:
     mx.eval(model.opacity_logits)
     logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
@@ -1459,6 +1548,7 @@ def main() -> None:
 
     out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanner_points.spz"
     export_sh_degree = active_sh_degree if args.color_mode == "sh" else args.sh_degree
+    spz_diagnostics = spz_export_diagnostics(model, args.color_mode, export_sh_degree)
     exported_gaussians = export_trained_spz(out_spz, model, args.color_mode, export_sh_degree)
     spz_size = out_spz.stat().st_size
     if spz_size <= 0:
@@ -1559,6 +1649,7 @@ def main() -> None:
         "spz_scale_convention": "trained log_scales",
         "spz_opacity_convention": "trained opacity logits",
         "spz_rotation_convention": "trained wxyz quats transformed by scanner axis3",
+        "spz_export_diagnostics": spz_diagnostics,
         "color_mode": args.color_mode,
         "color_path": "rgb_logits" if args.color_mode == "rgb" else "spherical_harmonics",
         "sh_degree": None if args.color_mode == "rgb" else args.sh_degree,

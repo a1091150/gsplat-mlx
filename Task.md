@@ -1292,6 +1292,9 @@
   and backward edge cases.
 
 ### Remaining SPZ and Viewer Alignment
+- [x] Add SPZ export diagnostics to `training_summary.json` for position,
+  transformed SPZ position, log-scale, opacity, quaternion norm, color, and SH
+  coefficient ranges.
 - [ ] Inspect exported RGB and SH `.spz` files in the target viewer after longer
   scanner training runs.
 - [ ] Confirm coordinate, quaternion, opacity-logit, and SH coefficient
