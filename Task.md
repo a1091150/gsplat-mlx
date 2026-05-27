@@ -1223,7 +1223,7 @@
 - [x] Task 6.28G: Add summary fields and preview diagnostics:
   `num_gaussians_before/after`, `n_clone`, `n_split`, `n_prune`,
   `n_opacity_reset`, `grad2d_mean/max`, and visible counts.
-- [ ] Task 6.28H: Add optional Makefile variables for strategy thresholds and
+- [x] Task 6.28H: Add optional Makefile variables for strategy thresholds and
   disabled-by-default refinement in smoke runs.
 
 ### Validation Plan

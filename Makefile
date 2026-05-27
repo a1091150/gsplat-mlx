@@ -56,7 +56,47 @@ SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
 SCANNER_POINTS_TRAIN_COLOR_MODE ?= rgb
 SCANNER_POINTS_TRAIN_SH_DEGREE ?= 0
 SCANNER_POINTS_TRAIN_MAX_SH_DEGREE ?= 1
+SCANNER_POINTS_REFINE_ENABLED ?= 0
+SCANNER_POINTS_REFINE_PRUNE_OPA ?= 0.005
+SCANNER_POINTS_REFINE_GROW_GRAD2D ?= 0.0002
+SCANNER_POINTS_REFINE_GROW_SCALE3D ?= 0.01
+SCANNER_POINTS_REFINE_GROW_SCALE2D ?= 0.05
+SCANNER_POINTS_REFINE_PRUNE_SCALE3D ?= 0.1
+SCANNER_POINTS_REFINE_PRUNE_SCALE2D ?= 0.15
+SCANNER_POINTS_REFINE_SCALE2D_STOP_ITER ?= 0
+SCANNER_POINTS_REFINE_START_ITER ?= 500
+SCANNER_POINTS_REFINE_STOP_ITER ?= 15000
+SCANNER_POINTS_REFINE_RESET_EVERY ?= 3000
+SCANNER_POINTS_REFINE_EVERY ?= 100
+SCANNER_POINTS_REFINE_PAUSE_AFTER_RESET ?= 0
+SCANNER_POINTS_REFINE_SCENE_SCALE ?= 1.0
+SCANNER_POINTS_REFINE_ABSGRAD ?= 0
+SCANNER_POINTS_REFINE_REVISED_OPACITY ?= 0
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
+
+SCANNER_POINTS_REFINE_FLAGS =
+ifeq ($(SCANNER_POINTS_REFINE_ENABLED),1)
+SCANNER_POINTS_REFINE_FLAGS += --refine-enabled
+SCANNER_POINTS_REFINE_FLAGS += --refine-prune-opa $(SCANNER_POINTS_REFINE_PRUNE_OPA)
+SCANNER_POINTS_REFINE_FLAGS += --refine-grow-grad2d $(SCANNER_POINTS_REFINE_GROW_GRAD2D)
+SCANNER_POINTS_REFINE_FLAGS += --refine-grow-scale3d $(SCANNER_POINTS_REFINE_GROW_SCALE3D)
+SCANNER_POINTS_REFINE_FLAGS += --refine-grow-scale2d $(SCANNER_POINTS_REFINE_GROW_SCALE2D)
+SCANNER_POINTS_REFINE_FLAGS += --refine-prune-scale3d $(SCANNER_POINTS_REFINE_PRUNE_SCALE3D)
+SCANNER_POINTS_REFINE_FLAGS += --refine-prune-scale2d $(SCANNER_POINTS_REFINE_PRUNE_SCALE2D)
+SCANNER_POINTS_REFINE_FLAGS += --refine-scale2d-stop-iter $(SCANNER_POINTS_REFINE_SCALE2D_STOP_ITER)
+SCANNER_POINTS_REFINE_FLAGS += --refine-start-iter $(SCANNER_POINTS_REFINE_START_ITER)
+SCANNER_POINTS_REFINE_FLAGS += --refine-stop-iter $(SCANNER_POINTS_REFINE_STOP_ITER)
+SCANNER_POINTS_REFINE_FLAGS += --refine-reset-every $(SCANNER_POINTS_REFINE_RESET_EVERY)
+SCANNER_POINTS_REFINE_FLAGS += --refine-every $(SCANNER_POINTS_REFINE_EVERY)
+SCANNER_POINTS_REFINE_FLAGS += --refine-pause-after-reset $(SCANNER_POINTS_REFINE_PAUSE_AFTER_RESET)
+SCANNER_POINTS_REFINE_FLAGS += --refine-scene-scale $(SCANNER_POINTS_REFINE_SCENE_SCALE)
+endif
+ifeq ($(SCANNER_POINTS_REFINE_ABSGRAD),1)
+SCANNER_POINTS_REFINE_FLAGS += --refine-absgrad
+endif
+ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
+SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
+endif
 
 .PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
 
@@ -77,6 +117,7 @@ help:
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
+	@printf "    Optional: SCANNER_POINTS_REFINE_ENABLED=1 plus SCANNER_POINTS_REFINE_* thresholds enable gsplat-style refinement.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -213,7 +254,8 @@ codex-scanner-points-train-spz:
 		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE) \
 		--color-mode $(SCANNER_POINTS_TRAIN_COLOR_MODE) \
 		--sh-degree $(SCANNER_POINTS_TRAIN_SH_DEGREE) \
-		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE)
+		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE) \
+		$(SCANNER_POINTS_REFINE_FLAGS)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
