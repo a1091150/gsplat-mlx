@@ -1220,7 +1220,7 @@
 - [x] Task 6.28E: Implement split for high-gradient large Gaussians with
   quaternion-derived local random offsets and scale shrink.
 - [x] Task 6.28F: Add opacity reset.
-- [ ] Task 6.28G: Add summary fields and preview diagnostics:
+- [x] Task 6.28G: Add summary fields and preview diagnostics:
   `num_gaussians_before/after`, `n_clone`, `n_split`, `n_prune`,
   `n_opacity_reset`, `grad2d_mean/max`, and visible counts.
 - [ ] Task 6.28H: Add optional Makefile variables for strategy thresholds and

@@ -491,8 +491,8 @@ class ScannerDefaultStrategyRuntime:
         model: Tiny3DGSModel | ScannerPointsSHModel,
         optimizers: dict[str, Adam],
     ) -> int:
-        value = np.clip(self.config.prune_opa * 2.0, 1.0e-6, 1.0 - 1.0e-6)
-        max_logit = float(np.log(value / (1.0 - value)))
+        value = self.opacity_reset_target()
+        max_logit = self.opacity_reset_target_logit()
         model.opacity_logits = mx.minimum(model.opacity_logits, mx.array(max_logit, dtype=model.opacity_logits.dtype))
 
         optimizer = optimizers.get("opacity_logits")
@@ -503,6 +503,13 @@ class ScannerDefaultStrategyRuntime:
                     param_state[state_name] = mx.zeros_like(param_state[state_name])
         mx.eval(model.opacity_logits)
         return int(model.opacity_logits.shape[1])
+
+    def opacity_reset_target(self) -> float:
+        return float(np.clip(self.config.prune_opa * 2.0, 1.0e-6, 1.0 - 1.0e-6))
+
+    def opacity_reset_target_logit(self) -> float:
+        value = self.opacity_reset_target()
+        return float(np.log(value / (1.0 - value)))
 
     def after_optimizer_step(
         self,
@@ -544,22 +551,49 @@ class ScannerDefaultStrategyRuntime:
                 "n_prune": n_prune,
                 "n_opacity_reset": n_opacity_reset,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "clone_split_prune_opacity_reset_task_6_28f",
+                "status": "clone_split_prune_reset_summary_task_6_28g",
             }
         )
 
     def summary(self) -> dict:
+        latest_event = self.events[-1] if self.events else None
+        topology_event_count = int(
+            sum(
+                1
+                for event in self.events
+                if event["n_clone"] or event["n_split"] or event["n_prune"] or event["n_opacity_reset"]
+            )
+        )
         return {
-            "implementation_phase": "task_6_28f_opacity_reset",
+            "implementation_phase": "task_6_28g_summary_diagnostics",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
             "final_gaussians": self.last_gaussians,
+            "gaussian_delta": int(self.last_gaussians - self.initial_gaussians),
             "events": self.events,
+            "latest_event": latest_event,
+            "event_count": len(self.events),
+            "topology_event_count": topology_event_count,
             "totals": self.totals,
+            "operation_totals": {
+                "clone": self.totals["n_clone"],
+                "split": self.totals["n_split"],
+                "prune": self.totals["n_prune"],
+                "opacity_reset": self.totals["n_opacity_reset"],
+            },
             "grad2d_accumulation": "dense_viewspace_points_gradient",
             "grad2d_stats": self.last_grad2d_stats,
-            "topology_changes": "clone_split_opacity_prune_and_reset_task_6_28f",
+            "preview_diagnostics": {
+                "visible_gaussians": self.last_grad2d_stats["visible_gaussians"],
+                "total_observations": self.last_grad2d_stats["total_observations"],
+                "grad2d_mean": self.last_grad2d_stats["grad2d_mean"],
+                "grad2d_max": self.last_grad2d_stats["grad2d_max"],
+                "radii_max": self.last_grad2d_stats["radii_max"],
+            },
+            "opacity_reset_target": self.opacity_reset_target(),
+            "opacity_reset_target_logit": self.opacity_reset_target_logit(),
+            "topology_changes": "clone_split_opacity_prune_reset_with_summary_diagnostics_task_6_28g",
         }
 
 
@@ -900,6 +934,20 @@ def export_trained_spz(
     return int(means.shape[0])
 
 
+def opacity_diagnostics(model: Tiny3DGSModel | ScannerPointsSHModel) -> dict:
+    mx.eval(model.opacity_logits)
+    logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
+    opacities = 1.0 / (1.0 + np.exp(-logits))
+    return {
+        "logit_min": float(logits.min()) if logits.size else 0.0,
+        "logit_mean": float(logits.mean()) if logits.size else 0.0,
+        "logit_max": float(logits.max()) if logits.size else 0.0,
+        "opacity_min": float(opacities.min()) if opacities.size else 0.0,
+        "opacity_mean": float(opacities.mean()) if opacities.size else 0.0,
+        "opacity_max": float(opacities.max()) if opacities.size else 0.0,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Downloads/2026_05_04_16_51_29"))
@@ -1213,6 +1261,8 @@ def main() -> None:
     if spz_size <= 0:
         raise AssertionError(f"SPZ output is empty: {out_spz}")
 
+    final_opacity_diagnostics = opacity_diagnostics(model)
+    refinement_summary = strategy.summary()
     frame_summaries = []
     for initial, final in zip(initial_stats, final_stats, strict=True):
         frame_summaries.append(
@@ -1228,6 +1278,18 @@ def main() -> None:
                 "final_intersections": int(final["intersections"]),
             }
         )
+    preview_diagnostics = {
+        "loss_delta": float(final_mean_loss - initial_mean_loss),
+        "loss_ratio": float(final_mean_loss / initial_mean_loss) if initial_mean_loss != 0.0 else None,
+        "last_viewspace_grad_norm": last_viewspace_grad_norm,
+        "initial_visible_gaussians_total": int(sum(item["initial_visible_gaussians"] for item in frame_summaries)),
+        "final_visible_gaussians_total": int(sum(item["final_visible_gaussians"] for item in frame_summaries)),
+        "initial_intersections_total": int(sum(item["initial_intersections"] for item in frame_summaries)),
+        "final_intersections_total": int(sum(item["final_intersections"] for item in frame_summaries)),
+        "refinement_operation_totals": refinement_summary["operation_totals"],
+        "refinement_latest_event": refinement_summary["latest_event"],
+        "final_opacity": final_opacity_diagnostics,
+    }
     summary = {
         "dataset": str(args.data),
         "width": args.width,
@@ -1255,12 +1317,14 @@ def main() -> None:
         "max_sh_degree": None if args.color_mode == "rgb" else args.max_sh_degree,
         "sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(args.sh_degree),
         "max_sh_coeff_count": None if args.color_mode == "rgb" else sh_coeff_count(args.max_sh_degree),
+        "final_opacity_diagnostics": final_opacity_diagnostics,
+        "preview_diagnostics": preview_diagnostics,
         "spz_color_convention": (
             "colors stores clipped RGB values; sh is empty"
             if args.color_mode == "rgb"
             else "colors stores SH degree-0 coefficients; sh stores higher-order coefficients"
         ),
-        "refinement_strategy": strategy.summary(),
+        "refinement_strategy": refinement_summary,
         "frame_summaries": frame_summaries,
     }
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
