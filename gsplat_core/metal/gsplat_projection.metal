@@ -483,3 +483,97 @@ kernel void gsplat_projection_ewa_3dgs_fused_backward_kernel(
   v_covars[cov_off + 4] = v_covar_w_total[2][1] + v_covar_w_total[1][2];
   v_covars[cov_off + 5] = v_covar_w_total[2][2];
 }
+
+kernel void gsplat_projection_ewa_3dgs_fused_backward_viewmats_kernel(
+    constant ProjectionKernelParams& params [[buffer(0)]],
+    const device float* means [[buffer(1)]],
+    const device float* covars [[buffer(2)]],
+    const device float* viewmats [[buffer(3)]],
+    const device float* Ks [[buffer(4)]],
+    const device int* radii [[buffer(5)]],
+    const device float* conics [[buffer(6)]],
+    const device float* compensations [[buffer(7)]],
+    const device float* v_means2d [[buffer(8)]],
+    const device float* v_depths [[buffer(9)]],
+    const device float* v_conics [[buffer(10)]],
+    const device float* v_compensations [[buffer(11)]],
+    device float* v_viewmats [[buffer(12)]],
+    uint camera_idx [[thread_position_in_grid]]) {
+  if (camera_idx >= params.B * params.C) {
+    return;
+  }
+
+  uint bid = camera_idx / params.C;
+  uint cid = camera_idx % params.C;
+  uint view_off = bid * params.C * 16 + cid * 16;
+  uint k_off = bid * params.C * 9 + cid * 9;
+  float3x3 R = float3x3(
+      float3(viewmats[view_off + 0], viewmats[view_off + 4], viewmats[view_off + 8]),
+      float3(viewmats[view_off + 1], viewmats[view_off + 5], viewmats[view_off + 9]),
+      float3(viewmats[view_off + 2], viewmats[view_off + 6], viewmats[view_off + 10]));
+  float3 t = float3(viewmats[view_off + 3], viewmats[view_off + 7], viewmats[view_off + 11]);
+  float3x3 v_R_total = float3x3(
+      float3(0.0f), float3(0.0f), float3(0.0f));
+  float3 v_t_total = float3(0.0f);
+
+  for (uint gid = 0; gid < params.N; ++gid) {
+    uint idx = (bid * params.C + cid) * params.N + gid;
+    if (radii[idx * 2] <= 0 || radii[idx * 2 + 1] <= 0) {
+      continue;
+    }
+
+    uint mean_off = bid * params.N * 3 + gid * 3;
+    uint cov_off = bid * params.N * 6 + gid * 6;
+    float3 mean_w = float3(means[mean_off], means[mean_off + 1], means[mean_off + 2]);
+    float3 mean_c = R * mean_w + t;
+    float3x3 covar_w = float3x3(
+        float3(covars[cov_off + 0], covars[cov_off + 1], covars[cov_off + 2]),
+        float3(covars[cov_off + 1], covars[cov_off + 3], covars[cov_off + 4]),
+        float3(covars[cov_off + 2], covars[cov_off + 4], covars[cov_off + 5]));
+    float3x3 covar_c = R * covar_w * transpose(R);
+
+    float c0 = conics[idx * 3];
+    float c1 = conics[idx * 3 + 1];
+    float c2 = conics[idx * 3 + 2];
+    float4 covar2d_inv = float4(c0, c1, c1, c2);
+    float4 v_covar2d_inv =
+        float4(v_conics[idx * 3], 0.5f * v_conics[idx * 3 + 1],
+               0.5f * v_conics[idx * 3 + 1], v_conics[idx * 3 + 2]);
+    float4 tmp = float4(
+        covar2d_inv.x * v_covar2d_inv.x + covar2d_inv.y * v_covar2d_inv.z,
+        covar2d_inv.x * v_covar2d_inv.y + covar2d_inv.y * v_covar2d_inv.w,
+        covar2d_inv.z * v_covar2d_inv.x + covar2d_inv.w * v_covar2d_inv.z,
+        covar2d_inv.z * v_covar2d_inv.y + covar2d_inv.w * v_covar2d_inv.w);
+    float4 v_covar2d = -float4(
+        tmp.x * covar2d_inv.x + tmp.y * covar2d_inv.z,
+        tmp.x * covar2d_inv.y + tmp.y * covar2d_inv.w,
+        tmp.z * covar2d_inv.x + tmp.w * covar2d_inv.z,
+        tmp.z * covar2d_inv.y + tmp.w * covar2d_inv.w);
+    if (params.calc_compensations != 0) {
+      add_blur_vjp(params.eps2d, covar2d_inv, compensations[idx],
+                   v_compensations[idx], v_covar2d);
+    }
+
+    float3 v_mean_c = float3(0.0f, 0.0f, v_depths[idx]);
+    float3x3 v_covar_c;
+    float2 v_mean2d_val = float2(v_means2d[idx * 2], v_means2d[idx * 2 + 1]);
+    persp_proj_vjp(mean_c, covar_c, Ks[k_off + 0], Ks[k_off + 4],
+                   Ks[k_off + 2], Ks[k_off + 5], params.image_width,
+                   params.image_height, v_covar2d, v_mean2d_val, v_mean_c,
+                   v_covar_c);
+
+    v_t_total += v_mean_c;
+    v_R_total[0] += mean_w.x * v_mean_c;
+    v_R_total[1] += mean_w.y * v_mean_c;
+    v_R_total[2] += mean_w.z * v_mean_c;
+    v_R_total += v_covar_c * R * transpose(covar_w);
+    v_R_total += transpose(v_covar_c) * R * covar_w;
+  }
+
+  for (uint row = 0; row < 3; ++row) {
+    for (uint col = 0; col < 3; ++col) {
+      v_viewmats[view_off + row * 4 + col] = v_R_total[col][row];
+    }
+    v_viewmats[view_off + row * 4 + 3] = v_t_total[row];
+  }
+}

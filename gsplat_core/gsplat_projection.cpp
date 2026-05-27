@@ -740,11 +740,6 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
     throw std::runtime_error(
         "GSPlatProjectionEWA3DGSFusedBackward GPU path currently supports pinhole only.");
   }
-  if (viewmats_requires_grad_) {
-    throw std::runtime_error(
-        "GSPlatProjectionEWA3DGSFusedBackward GPU path does not support viewmats gradients yet.");
-  }
-
   for (auto& out : outputs) {
     out.set_data(mx::allocator::malloc(out.nbytes()));
     std::memset(out.data<void>(), 0, out.nbytes());
@@ -764,6 +759,7 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
 
   auto& v_means = outputs[kProjectionVMeans];
   auto& v_covars = outputs[kProjectionVCovars];
+  auto& v_viewmats = outputs[kProjectionVViewmats];
 
   const int means_ndim = static_cast<int>(means.ndim());
   const int viewmats_ndim = static_cast<int>(viewmats.ndim());
@@ -819,6 +815,37 @@ void GSPlatProjectionEWA3DGSFusedBackward::eval_gpu(
   MTL::Size group_size = MTL::Size(tgp_size, 1, 1);
   MTL::Size grid_size = MTL::Size(numel, 1, 1);
   compute_encoder.dispatch_threads(grid_size, group_size);
+
+  if (viewmats_requires_grad_) {
+    const uint32_t num_cameras = b * c;
+    if (num_cameras == 0) {
+      return;
+    }
+    auto viewmat_kernel = d.get_kernel(
+        "gsplat_projection_ewa_3dgs_fused_backward_viewmats_kernel", lib);
+    compute_encoder.set_compute_pipeline_state(viewmat_kernel);
+    compute_encoder.set_bytes(kernel_params, 0);
+    compute_encoder.set_input_array(means, 1);
+    compute_encoder.set_input_array(covars, 2);
+    compute_encoder.set_input_array(viewmats, 3);
+    compute_encoder.set_input_array(Ks, 4);
+    compute_encoder.set_input_array(radii, 5);
+    compute_encoder.set_input_array(conics, 6);
+    compute_encoder.set_input_array(compensations, 7);
+    compute_encoder.set_input_array(v_means2d, 8);
+    compute_encoder.set_input_array(v_depths, 9);
+    compute_encoder.set_input_array(v_conics, 10);
+    compute_encoder.set_input_array(v_compensations, 11);
+    compute_encoder.set_output_array(v_viewmats, 12);
+
+    const size_t viewmat_max_threads =
+        viewmat_kernel->maxTotalThreadsPerThreadgroup();
+    const size_t viewmat_tgp_size =
+        std::min(static_cast<size_t>(num_cameras), viewmat_max_threads);
+    MTL::Size viewmat_group_size = MTL::Size(viewmat_tgp_size, 1, 1);
+    MTL::Size viewmat_grid_size = MTL::Size(num_cameras, 1, 1);
+    compute_encoder.dispatch_threads(viewmat_grid_size, viewmat_group_size);
+  }
 }
 #else
 void GSPlatProjectionEWA3DGSFused::eval_gpu(
@@ -1115,8 +1142,7 @@ std::vector<mx::array> GSPlatProjectionEWA3DGSFused::vjp(
 
   const bool needs_viewmats =
       std::find(argnums.begin(), argnums.end(), 5) != argnums.end();
-  const bool use_gpu_backward =
-      params_.use_covars && params_.camera_model == 0 && !needs_viewmats;
+  const bool use_gpu_backward = params_.use_covars && params_.camera_model == 0;
   mx::StreamOrDevice backward_stream = mx::Device::cpu;
   if (use_gpu_backward) {
     backward_stream = stream();

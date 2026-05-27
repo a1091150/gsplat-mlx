@@ -814,10 +814,10 @@
 ## Task 6.12 - Projection VJP Full GPU Path Routing
 - [x] Route projection `vjp(...)` to the current primitive stream when the
   request is supported by the first-pass Metal backward path:
-  dense covars, pinhole camera, and no `v_viewmats`.
+  dense covars and pinhole camera.
 - [x] Keep CPU/reference routing for unsupported projection backward cases:
-  quats/scales path, `v_viewmats`, non-pinhole cameras, packed paths, and
-  future distortion variants.
+  quats/scales path, non-pinhole cameras, packed paths, and future distortion
+  variants.
 - [x] Validate projection autograd smoke with `v_means`, `v_covars`, and
   `viewspace_points` gradients.
 - [x] Validate dense training smoke without adding extra `mx::eval(...)` inside
@@ -827,9 +827,21 @@
 - [x] Add `scripts/test/projection_vjp_guardrails.py`.
 - [x] Add `make codex-projection-guardrails`.
 - [x] Verify the supported full-GPU projection VJP boundary:
-  dense covars, pinhole camera, no `v_viewmats`, and nonzero `v_means`,
-  `v_covars`, and `viewspace_points` gradients.
+  dense covars, pinhole camera, and nonzero `v_means`, `v_covars`,
+  `v_viewmats`, and `viewspace_points` gradients.
 - [x] Report unsupported or fallback projection VJP cases explicitly:
-  quat/scale projection backward, `v_viewmats`, packed projection,
-  non-pinhole cameras, `Ks`, opacities, and distortion paths.
+  quat/scale projection backward, packed projection, non-pinhole cameras, `Ks`,
+  opacities, and distortion paths.
 - [x] Keep unsupported fallback diagnostics separate from full-GPU acceptance.
+
+## Task 6.14 - Projection Backward `v_viewmats` GPU Path
+- [x] Add a Metal `v_viewmats` reduction kernel for dense covars + pinhole
+  projection backward.
+- [x] Keep the first Metal version deterministic by assigning one thread per
+  `(batch, camera)` and reducing over all gaussians, instead of relying on
+  floating-point atomics.
+- [x] Route projection `vjp(...)` through the same-stream GPU backward path
+  even when `v_viewmats` is requested.
+- [x] Extend C++/Xcode smoke to compare GPU `v_viewmats` against CPU reference.
+- [x] Update projection VJP guardrails so `v_viewmats` is part of the supported
+  dense covars + pinhole full-GPU boundary.

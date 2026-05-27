@@ -25,7 +25,7 @@ The supported full-GPU path is now:
 GPU projection forward primitive
   -> vjp(...)
   -> GPU projection backward primitive on stream()
-  -> v_means / v_covars / v_quats / v_scales
+  -> v_means / v_covars / v_viewmats
 ```
 
 This path is selected only when the current Metal backward implementation
@@ -34,7 +34,6 @@ supports the request:
 ```text
 use_covars = true
 camera_model = pinhole
-v_viewmats is not requested
 ```
 
 Unsupported requests still use the CPU reference path for now. The CPU
@@ -75,7 +74,15 @@ camera_model = pinhole
 calc_compensations = true/false
 v_means
 v_covars
+v_viewmats
 ```
+
+The CUDA implementation uses warp-level reduction followed by `gpuAtomicAdd`
+for `v_viewmats`, because all gaussians for the same `(batch, camera)` add into
+the same view matrix. The first MLX/Metal implementation keeps the same
+reduction semantics but assigns one thread per `(batch, camera)` and loops over
+gaussians, which avoids relying on floating-point atomics while parity is being
+locked down.
 
 `GSPlatProjectionEWA3DGSFused::vjp(...)` now routes the supported dense covars
 pinhole path to `stream()`. The projection autograd and dense training smoke
@@ -114,6 +121,7 @@ pinhole camera_model = 0
 calc_compensations = true/false
 v_means
 v_covars
+v_viewmats
 viewspace_points gradient proxy
 ```
 
@@ -121,7 +129,6 @@ Fallback or not implemented:
 
 ```text
 quat/scale projection VJP
-v_viewmats
 non-pinhole cameras
 packed projection
 Ks gradients
@@ -131,9 +138,7 @@ external distortion paths
 
 Use `scripts/test/projection_vjp_guardrails.py` or
 `make codex-projection-guardrails` to verify the supported boundary and print
-the expected limitations. This diagnostic may check that a reference fallback
-still has the expected shape, but fallback success must not be interpreted as
-full-GPU coverage.
+the expected limitations.
 
 ## Recommended implementation slice
 
@@ -153,10 +158,9 @@ v_means
 v_covars
 ```
 
-Next outputs after covars GPU path parity is stable:
+Next outputs after dense covars GPU path parity is stable:
 
 ```text
-v_viewmats
 v_quats
 v_scales
 ```

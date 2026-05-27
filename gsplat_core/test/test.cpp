@@ -520,7 +520,7 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
       .v_compensations = v_compensations,
       .s = mx::Device::cpu,
       .params = bwd_params,
-      .viewmats_requires_grad = false,
+      .viewmats_requires_grad = true,
   };
   std::vector<mx::array> outputs =
       gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(bwd_input);
@@ -528,6 +528,8 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
                "projection backward v_means");
   expect_shape(outputs[gsplat_core::kProjectionVCovars], {1, 2, 6},
                "projection backward v_covars");
+  expect_shape(outputs[gsplat_core::kProjectionVViewmats], {1, 1, 4, 4},
+               "projection backward v_viewmats");
   mx::eval(outputs);
   const float* v_means = outputs[gsplat_core::kProjectionVMeans].data<float>();
   bool has_nonzero = false;
@@ -547,6 +549,10 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
       gpu_outputs[gsplat_core::kProjectionVCovars].data<float>();
   const float* cpu_v_covars =
       outputs[gsplat_core::kProjectionVCovars].data<float>();
+  const float* cpu_v_viewmats =
+      outputs[gsplat_core::kProjectionVViewmats].data<float>();
+  const float* gpu_v_viewmats =
+      gpu_outputs[gsplat_core::kProjectionVViewmats].data<float>();
   for (int i = 0; i < 6; ++i) {
     expect_close(gpu_v_means[i], v_means[i], 1.0e-2f,
                  "projection backward GPU v_means");
@@ -554,6 +560,10 @@ void test_projection_ewa_3dgs_fused_backward_reference() {
   for (int i = 0; i < 12; ++i) {
     expect_close(gpu_v_covars[i], cpu_v_covars[i], 1.0e-1f,
                  "projection backward GPU v_covars");
+  }
+  for (int i = 0; i < 16; ++i) {
+    expect_close(gpu_v_viewmats[i], cpu_v_viewmats[i], 1.0e-1f,
+                 "projection backward GPU v_viewmats");
   }
 
   std::cout << "projection_ewa_3dgs_fused backward reference smoke ok\n";

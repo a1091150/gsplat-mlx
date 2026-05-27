@@ -8,13 +8,11 @@ projection_ewa_3dgs_fused_forward = smoke.projection_ewa_3dgs_fused_forward
 EXPECTED_FULL_GPU_SUPPORT = (
     "dense covars input",
     "pinhole camera_model=0",
-    "no v_viewmats request",
-    "v_means, v_covars, and viewspace_points gradients",
+    "v_means, v_covars, v_viewmats, and viewspace_points gradients",
 )
 
 EXPECTED_LIMITATIONS = (
     "quat/scale projection VJP still uses CPU/reference routing",
-    "v_viewmats projection VJP still uses CPU/reference routing",
     "non-pinhole cameras are not supported by projection backward",
     "packed projection is not implemented in gsplat_core yet",
     "Ks and opacity gradients are intentionally out of scope",
@@ -134,7 +132,7 @@ def check_supported_full_gpu_vjp() -> None:
     assert_nonzero("supported v_viewspace_points", grads[2])
 
 
-def check_viewmats_reference_fallback_shape() -> str:
+def check_supported_full_gpu_viewmats_vjp() -> None:
     means, covars, viewspace_points, viewmats, Ks = base_inputs()
 
     def loss_fn(
@@ -151,24 +149,27 @@ def check_viewmats_reference_fallback_shape() -> str:
             Ks,
         )
 
-    try:
-        loss, grads = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3))(
-            means,
-            covars,
-            viewmats,
-            viewspace_points,
-        )
-        mx.eval(loss, *grads)
-    except Exception as exc:  # noqa: BLE001 - diagnostic script reports fallback state.
-        return f"v_viewmats reference fallback unavailable: {type(exc).__name__}: {exc}"
-
-    assert_shape("fallback v_viewmats", grads[2], tuple(viewmats.shape))
-    return "v_viewmats reference fallback shape ok (not a full GPU path)"
+    loss, grads = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3))(
+        means,
+        covars,
+        viewmats,
+        viewspace_points,
+    )
+    mx.eval(loss, *grads)
+    assert_shape("supported v_means with v_viewmats", grads[0], tuple(means.shape))
+    assert_shape("supported v_covars with v_viewmats", grads[1], tuple(covars.shape))
+    assert_shape("supported v_viewmats", grads[2], tuple(viewmats.shape))
+    assert_shape(
+        "supported v_viewspace_points with v_viewmats",
+        grads[3],
+        tuple(viewspace_points.shape),
+    )
+    assert_nonzero("supported v_viewmats", grads[2])
 
 
 def main() -> None:
     check_supported_full_gpu_vjp()
-    fallback_status = check_viewmats_reference_fallback_shape()
+    check_supported_full_gpu_viewmats_vjp()
 
     print("projection vjp guardrails ok")
     print("full GPU support:")
@@ -177,7 +178,6 @@ def main() -> None:
     print("expected limitations:")
     for item in EXPECTED_LIMITATIONS:
         print(f"  - {item}")
-    print(f"diagnostic: {fallback_status}")
 
 
 if __name__ == "__main__":
