@@ -486,6 +486,24 @@ class ScannerDefaultStrategyRuntime:
         mx.eval(model.means, model.quats, model.log_scales, model.opacity_logits)
         return n_prune
 
+    def _reset_opacity(
+        self,
+        model: Tiny3DGSModel | ScannerPointsSHModel,
+        optimizers: dict[str, Adam],
+    ) -> int:
+        value = np.clip(self.config.prune_opa * 2.0, 1.0e-6, 1.0 - 1.0e-6)
+        max_logit = float(np.log(value / (1.0 - value)))
+        model.opacity_logits = mx.minimum(model.opacity_logits, mx.array(max_logit, dtype=model.opacity_logits.dtype))
+
+        optimizer = optimizers.get("opacity_logits")
+        if optimizer is not None and "opacity_logits" in optimizer.state:
+            param_state = optimizer.state["opacity_logits"]
+            for state_name in ("m", "v"):
+                if state_name in param_state:
+                    param_state[state_name] = mx.zeros_like(param_state[state_name])
+        mx.eval(model.opacity_logits)
+        return int(model.opacity_logits.shape[1])
+
     def after_optimizer_step(
         self,
         step: int,
@@ -507,9 +525,11 @@ class ScannerDefaultStrategyRuntime:
             else 0
         )
         n_prune = self._prune_by_opacity(model, optimizers, color_mode) if scheduled_refine else 0
+        n_opacity_reset = self._reset_opacity(model, optimizers) if scheduled_reset else 0
         self.totals["n_clone"] += n_clone
         self.totals["n_split"] += n_split
         self.totals["n_prune"] += n_prune
+        self.totals["n_opacity_reset"] += n_opacity_reset
         after_count = int(model.means.shape[1])
         self.last_gaussians = after_count
         self.events.append(
@@ -522,15 +542,15 @@ class ScannerDefaultStrategyRuntime:
                 "n_clone": n_clone,
                 "n_split": n_split,
                 "n_prune": n_prune,
-                "n_opacity_reset": 0,
+                "n_opacity_reset": n_opacity_reset,
                 "grad2d_stats": self.last_grad2d_stats,
-                "status": "clone_split_prune_task_6_28e",
+                "status": "clone_split_prune_opacity_reset_task_6_28f",
             }
         )
 
     def summary(self) -> dict:
         return {
-            "implementation_phase": "task_6_28e_split",
+            "implementation_phase": "task_6_28f_opacity_reset",
             "enabled": self.config.enabled,
             "config": asdict(self.config),
             "initial_gaussians": self.initial_gaussians,
@@ -539,7 +559,7 @@ class ScannerDefaultStrategyRuntime:
             "totals": self.totals,
             "grad2d_accumulation": "dense_viewspace_points_gradient",
             "grad2d_stats": self.last_grad2d_stats,
-            "topology_changes": "clone_split_and_opacity_prune_task_6_28e",
+            "topology_changes": "clone_split_opacity_prune_and_reset_task_6_28f",
         }
 
 
