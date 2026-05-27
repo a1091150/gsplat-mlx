@@ -25,9 +25,16 @@ SCANNER_SMOKE_HEIGHT ?= 512
 SCANNER_SMOKE_N ?= 1024
 SCANNER_SMOKE_FRAMES ?= 3
 SCANNER_SMOKE_FRAME_STEP ?= 1
+SCANNER_TRAIN_OUT ?= outputs/scanner_random_3dgs_train
+SCANNER_TRAIN_WIDTH ?= 512
+SCANNER_TRAIN_HEIGHT ?= 512
+SCANNER_TRAIN_N ?= 1024
+SCANNER_TRAIN_FRAMES ?= 3
+SCANNER_TRAIN_FRAME_STEP ?= 1
+SCANNER_TRAIN_STEPS ?= 40
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -42,6 +49,7 @@ help:
 	@printf "  make codex-tiny-train  Run a tiny MLX nn.Module+Adam 3DGS training example.\n"
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
+	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
 
@@ -132,6 +140,17 @@ codex-scanner-dataset-smoke:
 		--num-gaussians $(SCANNER_SMOKE_N) \
 		--max-frames $(SCANNER_SMOKE_FRAMES) \
 		--frame-step $(SCANNER_SMOKE_FRAME_STEP)
+
+codex-scanner-random-train:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanner_random_3dgs_mlx.py \
+		--data "$(SCANNER_DATASET)" \
+		--out-dir "$(SCANNER_TRAIN_OUT)" \
+		--width $(SCANNER_TRAIN_WIDTH) \
+		--height $(SCANNER_TRAIN_HEIGHT) \
+		--num-gaussians $(SCANNER_TRAIN_N) \
+		--max-frames $(SCANNER_TRAIN_FRAMES) \
+		--frame-step $(SCANNER_TRAIN_FRAME_STEP) \
+		--steps $(SCANNER_TRAIN_STEPS)
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py

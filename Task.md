@@ -974,3 +974,25 @@
   and nonzero intersections.
 - [ ] Compare camera convention against a known-good gsplat/PyTorch or viewer
   render before using this loader for real training.
+
+## Task 6.22 - Scanner Dataset Random Gaussian Training Smoke
+- [x] Add `scripts/test/train_scanner_random_3dgs_mlx.py`.
+- [x] Read scanner dataset `frame_*.jpg` / `frame_*.json` pairs through the
+  Task 6.21 camera/image loader.
+- [x] Do not read `points.ply`; initialize random Gaussians around the selected
+  scanner cameras.
+- [x] Train one shared `Tiny3DGSModel` against real scanner target images by
+  cycling selected frames.
+- [x] Use `mx.value_and_grad(..., argnums=(0, 1, 2, 3, 4, 5))` with
+  `viewspace_points` as the dummy trainable proxy argument.
+- [x] Update means, quats, log-scales, color logits, and opacity logits with
+  Adam optimizers.
+- [x] Render through projection -> intersect tile -> intersect offset ->
+  rasterize for every training step.
+- [x] Save target images plus initial/final render previews per scanner frame.
+- [x] Add `make codex-scanner-random-train` and scanner training Makefile
+  variables.
+- [x] Validate a short training run with finite loss, nonzero
+  `viewspace_points` gradient, and non-diverging mean frame loss.
+- [ ] Revisit camera convention and initialization quality before treating this
+  as a real scanner training pipeline.
