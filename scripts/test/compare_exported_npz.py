@@ -12,6 +12,7 @@ import numpy as np
 from gsplat_core import (
     intersect_offset_forward,
     intersect_tile_forward,
+    projection_ewa_3dgs_fused_backward,
     projection_ewa_3dgs_fused_forward,
     quat_scale_to_covar_preci_backward,
     quat_scale_to_covar_preci_forward,
@@ -76,6 +77,55 @@ def compare_projection(data: np.lib.npyio.NpzFile) -> list[bool]:
         results.append(compare_array("conics", ref(data, "conics"), mx_to_numpy(actual["conics"]), atol=1.0e-4, rtol=1.0e-4))
     if "ref__compensations" in data.files:
         results.append(compare_array("compensations", ref(data, "compensations"), mx_to_numpy(actual["compensations"]), atol=1.0e-4, rtol=1.0e-4))
+    return results
+
+
+def compare_projection_backward(data: np.lib.npyio.NpzFile) -> list[bool]:
+    inputs = {
+        "means": mx_array(data, "input__means"),
+        "viewmats": mx_array(data, "input__viewmats"),
+        "Ks": mx_array(data, "input__Ks"),
+    }
+    if "input__covars" in data.files:
+        inputs["covars"] = mx_array(data, "input__covars")
+    else:
+        inputs["quats"] = mx_array(data, "input__quats")
+        inputs["scales"] = mx_array(data, "input__scales")
+    forward_outputs = {
+        "radii": mx_array(data, "fwd__radii"),
+        "conics": mx_array(data, "fwd__conics"),
+    }
+    if "fwd__compensations" in data.files:
+        forward_outputs["compensations"] = mx_array(data, "fwd__compensations")
+    cotangents = {
+        "v_means2d": mx_array(data, "cotangent__v_means2d"),
+        "v_depths": mx_array(data, "cotangent__v_depths"),
+        "v_conics": mx_array(data, "cotangent__v_conics"),
+    }
+    if "cotangent__v_compensations" in data.files:
+        cotangents["v_compensations"] = mx_array(data, "cotangent__v_compensations")
+    actual = projection_ewa_3dgs_fused_backward(
+        inputs,
+        forward_outputs,
+        cotangents,
+        image_width=int(scalar(data, "input__image_width")),
+        image_height=int(scalar(data, "input__image_height")),
+        eps2d=float(scalar(data, "input__eps2d")),
+        camera_model=int(scalar(data, "input__camera_model")),
+        viewmats_requires_grad=bool(scalar(data, "meta__viewmats_requires_grad")) if "meta__viewmats_requires_grad" in data.files else False,
+    )
+    mx.eval(*actual.values())
+    results = [
+        compare_array("v_means", ref(data, "v_means"), mx_to_numpy(actual["v_means"]), atol=3.0e-3, rtol=3.0e-3),
+    ]
+    if "ref__v_covars" in data.files:
+        results.append(compare_array("v_covars", ref(data, "v_covars"), mx_to_numpy(actual["v_covars"]), atol=3.0e-3, rtol=3.0e-3))
+    if "ref__v_quats" in data.files:
+        results.append(compare_array("v_quats", ref(data, "v_quats"), mx_to_numpy(actual["v_quats"]), atol=3.0e-3, rtol=3.0e-3))
+    if "ref__v_scales" in data.files:
+        results.append(compare_array("v_scales", ref(data, "v_scales"), mx_to_numpy(actual["v_scales"]), atol=3.0e-3, rtol=3.0e-3))
+    if "ref__v_viewmats" in data.files:
+        results.append(compare_array("v_viewmats", ref(data, "v_viewmats"), mx_to_numpy(actual["v_viewmats"]), atol=3.0e-3, rtol=3.0e-3))
     return results
 
 
@@ -331,6 +381,7 @@ def compare_chain(data: np.lib.npyio.NpzFile) -> list[bool]:
 COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "forward_3dgs_chain.npz": compare_chain,
     "intersect_tile_forward.npz": compare_intersect,
+    "projection_ewa_3dgs_fused_backward.npz": compare_projection_backward,
     "projection_ewa_3dgs_fused_forward.npz": compare_projection,
     "quat_scale_to_covar_preci_backward.npz": compare_quat_scale_backward,
     "quat_scale_to_covar_preci_forward.npz": compare_quat_scale,

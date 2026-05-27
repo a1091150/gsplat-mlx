@@ -433,6 +433,106 @@ void test_projection_ewa_3dgs_fused_gpu_culling_and_empty_compensation() {
   std::cout << "projection_ewa_3dgs_fused GPU culling smoke ok\n";
 }
 
+void test_projection_ewa_3dgs_fused_backward_reference() {
+  mx::array means(
+      {0.1f, -0.05f, 2.0f,
+       0.25f, 0.15f, 3.0f},
+      {1, 2, 3},
+      mx::float32);
+  mx::array covars(
+      {0.04f, 0.002f, 0.001f, 0.05f, -0.003f, 0.06f,
+       0.03f, -0.001f, 0.002f, 0.045f, 0.004f, 0.055f},
+      {1, 2, 6},
+      mx::float32);
+  mx::array viewmats(
+      {1.0f, 0.0f, 0.0f, 0.0f,
+       0.0f, 1.0f, 0.0f, 0.0f,
+       0.0f, 0.0f, 1.0f, 0.0f,
+       0.0f, 0.0f, 0.0f, 1.0f},
+      {1, 1, 4, 4},
+      mx::float32);
+  mx::array Ks(
+      {90.0f, 0.0f, 32.0f,
+       0.0f, 88.0f, 24.0f,
+       0.0f, 0.0f, 1.0f},
+      {1, 1, 3, 3},
+      mx::float32);
+  gsplat_core::ProjectionEWA3DGSFusedParams fwd_params = {
+      .image_width = 64,
+      .image_height = 48,
+      .eps2d = 0.3f,
+      .near_plane = 0.01f,
+      .far_plane = 100.0f,
+      .radius_clip = 0.0f,
+      .calc_compensations = true,
+      .camera_model = 0,
+      .use_covars = true,
+      .use_opacities = false,
+  };
+  gsplat_core::ProjectionEWA3DGSFusedInput fwd_input = {
+      .means = means,
+      .covars = covars,
+      .quats = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .scales = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .opacities = mx::zeros({0}, mx::float32, mx::Device::gpu),
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .s = mx::Device::gpu,
+      .params = fwd_params,
+  };
+  std::vector<mx::array> fwd =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused(fwd_input);
+  mx::array radii({1, 1, 1, 1}, {1, 1, 2, 2}, mx::int32);
+  mx::array v_means2d(
+      {0.2f, -0.1f,
+       0.05f, 0.3f},
+      {1, 1, 2, 2},
+      mx::float32);
+  mx::array v_depths({0.4f, -0.2f}, {1, 1, 2}, mx::float32);
+  mx::array v_conics(
+      {0.1f, -0.05f, 0.2f,
+       -0.15f, 0.25f, -0.1f},
+      {1, 1, 2, 3},
+      mx::float32);
+  mx::array v_compensations({0.3f, -0.25f}, {1, 1, 2}, mx::float32);
+  gsplat_core::ProjectionEWA3DGSFusedParams bwd_params = fwd_params;
+  bwd_params.near_plane = -1.0e20f;
+  bwd_params.far_plane = 1.0e20f;
+  gsplat_core::ProjectionEWA3DGSFusedBackwardInput bwd_input = {
+      .means = means,
+      .covars = covars,
+      .quats = mx::zeros({0}, mx::float32, mx::Device::cpu),
+      .scales = mx::zeros({0}, mx::float32, mx::Device::cpu),
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .radii = radii,
+      .conics = fwd[gsplat_core::kConics],
+      .compensations = fwd[gsplat_core::kCompensations],
+      .v_means2d = v_means2d,
+      .v_depths = v_depths,
+      .v_conics = v_conics,
+      .v_compensations = v_compensations,
+      .s = mx::Device::cpu,
+      .params = bwd_params,
+      .viewmats_requires_grad = false,
+  };
+  std::vector<mx::array> outputs =
+      gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(bwd_input);
+  expect_shape(outputs[gsplat_core::kProjectionVMeans], {1, 2, 3},
+               "projection backward v_means");
+  expect_shape(outputs[gsplat_core::kProjectionVCovars], {1, 2, 6},
+               "projection backward v_covars");
+  mx::eval(outputs);
+  const float* v_means = outputs[gsplat_core::kProjectionVMeans].data<float>();
+  bool has_nonzero = false;
+  for (int i = 0; i < 6; ++i) {
+    has_nonzero = has_nonzero || std::fabs(v_means[i]) > 1.0e-6f;
+  }
+  expect(has_nonzero, "projection backward v_means should be nonzero");
+
+  std::cout << "projection_ewa_3dgs_fused backward reference smoke ok\n";
+}
+
 void test_intersect_tile_and_offset_dense_aabb() {
   mx::array means2d(
       {20.0f, 20.0f, 50.0f, 50.0f, 8.0f, 8.0f},
@@ -1967,6 +2067,7 @@ int main() {
     test_projection_ewa_3dgs_fused_shapes();
     test_projection_ewa_3dgs_fused_gpu_numeric();
     test_projection_ewa_3dgs_fused_gpu_culling_and_empty_compensation();
+    test_projection_ewa_3dgs_fused_backward_reference();
     test_intersect_tile_and_offset_dense_aabb();
     test_intersect_tile_count_gpu_dense_aabb();
     test_intersect_tile_encode_gpu_dense_aabb();

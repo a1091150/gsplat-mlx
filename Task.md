@@ -631,7 +631,7 @@
 - [x] Task 6.3: Spherical harmonics explicit backward.
 - [x] Task 6.4: Quat/scale covariance/precision explicit backward.
 - [x] Task 6.5: Rasterize to pixels 3DGS explicit backward.
-- [ ] Task 6.6: Projection EWA 3DGS fused explicit backward.
+- [x] Task 6.6: Projection EWA 3DGS fused explicit backward.
 - [ ] Task 6.7: Wire MLX Primitive `vjp(...)` for stable backward ops.
 - [ ] Task 6.8: Dense training smoke with `viewspace_points` gradient proxy.
 
@@ -721,3 +721,20 @@
 - [x] Extend exported `.npz` compare support for `rasterize_to_pixels_3dgs_backward.npz`.
 - [x] Validate exported CUDA fixture `refs/rasterize_to_pixels_3dgs_backward.npz`.
 - [ ] Add packed rasterize backward support if packed training path becomes in scope.
+
+## Task 6.6 - Projection EWA 3DGS Fused Explicit Backward
+- [x] Add `ProjectionEWA3DGSFusedBackwardInput`.
+- [x] Add explicit C++ entry `gsplat_projection_ewa_3dgs_fused_backward(...)`.
+- [x] Add `GSPlatProjectionEWA3DGSFusedBackward` MLX Primitive.
+- [x] Implement first-pass dense pinhole backward with finite-difference VJP.
+- [x] Support covars path outputs: `v_means`, `v_covars`.
+- [x] Support quats/scales path outputs: `v_means`, `v_quats`, `v_scales`.
+- [x] Support optional `v_compensations`.
+- [x] Expose Python binding `projection_ewa_3dgs_fused_backward(...)`.
+- [x] Add C++ smoke for covars path.
+- [x] Add CUDA export script `scripts/export_ref/export_projection_ewa_3dgs_fused_backward.py`.
+- [x] Extend exported `.npz` compare support for `projection_ewa_3dgs_fused_backward.npz`.
+- [x] Validate exported CUDA fixture `refs/projection_ewa_3dgs_fused_backward.npz`.
+- [ ] Replace first-version finite-difference VJP with CUDA-style analytic VJP.
+- [ ] Add Metal projection backward kernel after analytic VJP is locked.
+- [ ] Add packed projection backward support if packed training path becomes in scope.

@@ -113,6 +113,75 @@ nb::dict projection_ewa_3dgs_fused_forward(
   return result;
 }
 
+nb::dict projection_ewa_3dgs_fused_backward(
+    const std::unordered_map<std::string, mx::array>& inputs,
+    const std::unordered_map<std::string, mx::array>& forward_outputs,
+    const std::unordered_map<std::string, mx::array>& cotangents,
+    int image_width,
+    int image_height,
+    float eps2d,
+    int camera_model,
+    bool viewmats_requires_grad) {
+  const auto& means = require_key(inputs, "means");
+  const auto& viewmats = require_key(inputs, "viewmats");
+  const auto& Ks = require_key(inputs, "Ks");
+  mx::array covars = get_or_empty(inputs, "covars");
+  mx::array quats = get_or_empty(inputs, "quats");
+  mx::array scales = get_or_empty(inputs, "scales");
+  const auto& radii = require_key(forward_outputs, "radii");
+  const auto& conics = require_key(forward_outputs, "conics");
+  mx::array compensations = get_or_empty(forward_outputs, "compensations");
+  const auto& v_means2d = require_key(cotangents, "v_means2d");
+  const auto& v_depths = require_key(cotangents, "v_depths");
+  const auto& v_conics = require_key(cotangents, "v_conics");
+  mx::array v_compensations = get_or_empty(cotangents, "v_compensations");
+
+  const bool use_covars = covars.size() != 0;
+  gsplat_core::ProjectionEWA3DGSFusedBackwardInput input = {
+      .means = means,
+      .covars = covars,
+      .quats = quats,
+      .scales = scales,
+      .viewmats = viewmats,
+      .Ks = Ks,
+      .radii = radii,
+      .conics = conics,
+      .compensations = compensations,
+      .v_means2d = v_means2d,
+      .v_depths = v_depths,
+      .v_conics = v_conics,
+      .v_compensations = v_compensations,
+      .s = mx::Device::cpu,
+      .params = {
+          .image_width = image_width,
+          .image_height = image_height,
+          .eps2d = eps2d,
+          .near_plane = -1.0e20f,
+          .far_plane = 1.0e20f,
+          .radius_clip = 0.0f,
+          .calc_compensations = compensations.size() != 0,
+          .camera_model = camera_model,
+          .use_covars = use_covars,
+          .use_opacities = false,
+      },
+      .viewmats_requires_grad = viewmats_requires_grad,
+  };
+
+  auto outputs = gsplat_core::gsplat_projection_ewa_3dgs_fused_backward(input);
+  nb::dict result;
+  result["v_means"] = outputs[gsplat_core::kProjectionVMeans];
+  if (use_covars) {
+    result["v_covars"] = outputs[gsplat_core::kProjectionVCovars];
+  } else {
+    result["v_quats"] = outputs[gsplat_core::kProjectionVQuats];
+    result["v_scales"] = outputs[gsplat_core::kProjectionVScales];
+  }
+  if (viewmats_requires_grad) {
+    result["v_viewmats"] = outputs[gsplat_core::kProjectionVViewmats];
+  }
+  return result;
+}
+
 nb::dict intersect_tile_forward(
     const std::unordered_map<std::string, mx::array>& inputs,
     int I,
@@ -389,6 +458,17 @@ NB_MODULE(_gsplat_core, m) {
       "radius_clip"_a = 0.0f,
       "calc_compensations"_a = false,
       "camera_model"_a = 0);
+  m.def(
+      "projection_ewa_3dgs_fused_backward",
+      &projection_ewa_3dgs_fused_backward,
+      "inputs"_a,
+      "forward_outputs"_a,
+      "cotangents"_a,
+      "image_width"_a,
+      "image_height"_a,
+      "eps2d"_a = 0.3f,
+      "camera_model"_a = 0,
+      "viewmats_requires_grad"_a = false);
   m.def(
       "intersect_tile_forward",
       &intersect_tile_forward,
