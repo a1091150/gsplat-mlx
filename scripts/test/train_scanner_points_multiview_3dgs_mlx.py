@@ -1164,6 +1164,49 @@ def scheduled_lr(
     return lr
 
 
+def validate_lr_schedule_args(
+    name: str,
+    initial_lr: float,
+    final_lr: float | None,
+    delay_mult: float,
+    max_steps: int,
+) -> None:
+    if initial_lr <= 0.0:
+        raise ValueError(f"--lr-{name} must be positive")
+    if final_lr is not None and final_lr <= 0.0:
+        raise ValueError(f"--lr-{name}-final must be positive")
+    if delay_mult <= 0.0 or delay_mult > 1.0:
+        raise ValueError(f"--lr-{name}-delay-mult must be in (0, 1]")
+    if max_steps <= 0:
+        raise ValueError(f"--lr-{name}-max-steps must be positive")
+
+
+def make_lr_schedule(
+    initial_lr: float,
+    final_lr: float | None,
+    delay_mult: float,
+    max_steps: int,
+) -> dict:
+    return {
+        "initial": float(initial_lr),
+        "final": None if final_lr is None else float(final_lr),
+        "delay_mult": float(delay_mult),
+        "max_steps": int(max_steps),
+        "latest": float(initial_lr),
+        "history": [],
+    }
+
+
+def lr_for_step(schedule: dict, step: int) -> float:
+    return scheduled_lr(
+        step,
+        schedule["initial"],
+        schedule["final"],
+        schedule["max_steps"],
+        schedule["delay_mult"],
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Downloads/2026_05_04_16_51_29"))
@@ -1190,10 +1233,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr-means-delay-mult", type=float, default=1.0)
     parser.add_argument("--lr-means-max-steps", type=int, default=None)
     parser.add_argument("--lr-colors", type=float, default=2.0e-2)
+    parser.add_argument("--lr-colors-final", type=float, default=None)
+    parser.add_argument("--lr-colors-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-colors-max-steps", type=int, default=None)
     parser.add_argument("--lr-sh-rest", type=float, default=None)
+    parser.add_argument("--lr-sh-rest-final", type=float, default=None)
+    parser.add_argument("--lr-sh-rest-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-sh-rest-max-steps", type=int, default=None)
     parser.add_argument("--lr-opacity", type=float, default=5.0e-3)
+    parser.add_argument("--lr-opacity-final", type=float, default=None)
+    parser.add_argument("--lr-opacity-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-opacity-max-steps", type=int, default=None)
     parser.add_argument("--lr-scales", type=float, default=1.0e-3)
+    parser.add_argument("--lr-scales-final", type=float, default=None)
+    parser.add_argument("--lr-scales-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-scales-max-steps", type=int, default=None)
     parser.add_argument("--lr-quats", type=float, default=1.0e-3)
+    parser.add_argument("--lr-quats-final", type=float, default=None)
+    parser.add_argument("--lr-quats-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-quats-max-steps", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--color-mode", choices=("rgb", "sh"), default="rgb")
     parser.add_argument("--sh-degree", type=int, default=0)
@@ -1265,16 +1323,55 @@ def main() -> None:
         raise ValueError("--refine-stop-iter must be greater than --refine-start-iter")
     if args.refine_scene_scale <= 0.0:
         raise ValueError("--refine-scene-scale must be positive")
-    if args.lr_means <= 0.0:
-        raise ValueError("--lr-means must be positive")
-    if args.lr_means_final is not None and args.lr_means_final <= 0.0:
-        raise ValueError("--lr-means-final must be positive")
-    if args.lr_means_delay_mult <= 0.0 or args.lr_means_delay_mult > 1.0:
-        raise ValueError("--lr-means-delay-mult must be in (0, 1]")
     lr_means_max_steps = args.steps if args.lr_means_max_steps is None else args.lr_means_max_steps
-    if lr_means_max_steps <= 0:
-        raise ValueError("--lr-means-max-steps must be positive")
+    lr_colors_max_steps = args.steps if args.lr_colors_max_steps is None else args.lr_colors_max_steps
     lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
+    lr_sh_rest_max_steps = args.steps if args.lr_sh_rest_max_steps is None else args.lr_sh_rest_max_steps
+    lr_opacity_max_steps = args.steps if args.lr_opacity_max_steps is None else args.lr_opacity_max_steps
+    lr_scales_max_steps = args.steps if args.lr_scales_max_steps is None else args.lr_scales_max_steps
+    lr_quats_max_steps = args.steps if args.lr_quats_max_steps is None else args.lr_quats_max_steps
+    validate_lr_schedule_args(
+        "means",
+        args.lr_means,
+        args.lr_means_final,
+        args.lr_means_delay_mult,
+        lr_means_max_steps,
+    )
+    validate_lr_schedule_args(
+        "colors",
+        args.lr_colors,
+        args.lr_colors_final,
+        args.lr_colors_delay_mult,
+        lr_colors_max_steps,
+    )
+    validate_lr_schedule_args(
+        "sh-rest",
+        lr_sh_rest,
+        args.lr_sh_rest_final,
+        args.lr_sh_rest_delay_mult,
+        lr_sh_rest_max_steps,
+    )
+    validate_lr_schedule_args(
+        "opacity",
+        args.lr_opacity,
+        args.lr_opacity_final,
+        args.lr_opacity_delay_mult,
+        lr_opacity_max_steps,
+    )
+    validate_lr_schedule_args(
+        "scales",
+        args.lr_scales,
+        args.lr_scales_final,
+        args.lr_scales_delay_mult,
+        lr_scales_max_steps,
+    )
+    validate_lr_schedule_args(
+        "quats",
+        args.lr_quats,
+        args.lr_quats_final,
+        args.lr_quats_delay_mult,
+        lr_quats_max_steps,
+    )
     strategy_config = ScannerDefaultStrategyConfig(
         enabled=args.refine_enabled,
         prune_opa=args.refine_prune_opa,
@@ -1409,22 +1506,66 @@ def main() -> None:
         optimizers["features_dc"] = Adam(learning_rate=args.lr_colors)
         optimizers["features_rest"] = Adam(learning_rate=lr_sh_rest)
 
+    lr_schedules = {
+        "means": make_lr_schedule(
+            args.lr_means,
+            args.lr_means_final,
+            args.lr_means_delay_mult,
+            lr_means_max_steps,
+        ),
+        "quats": make_lr_schedule(
+            args.lr_quats,
+            args.lr_quats_final,
+            args.lr_quats_delay_mult,
+            lr_quats_max_steps,
+        ),
+        "log_scales": make_lr_schedule(
+            args.lr_scales,
+            args.lr_scales_final,
+            args.lr_scales_delay_mult,
+            lr_scales_max_steps,
+        ),
+        "opacity_logits": make_lr_schedule(
+            args.lr_opacity,
+            args.lr_opacity_final,
+            args.lr_opacity_delay_mult,
+            lr_opacity_max_steps,
+        ),
+    }
+    if args.color_mode == "rgb":
+        lr_schedules["color_logits"] = make_lr_schedule(
+            args.lr_colors,
+            args.lr_colors_final,
+            args.lr_colors_delay_mult,
+            lr_colors_max_steps,
+        )
+    else:
+        lr_schedules["features_dc"] = make_lr_schedule(
+            args.lr_colors,
+            args.lr_colors_final,
+            args.lr_colors_delay_mult,
+            lr_colors_max_steps,
+        )
+        lr_schedules["features_rest"] = make_lr_schedule(
+            lr_sh_rest,
+            args.lr_sh_rest_final,
+            args.lr_sh_rest_delay_mult,
+            lr_sh_rest_max_steps,
+        )
+
     last_loss = None
     last_viewspace_grad = None
     last_viewspace_grad_norm = None
-    means_lr_history = []
-    latest_means_lr = args.lr_means
     for step in range(1, args.steps + 1):
-        latest_means_lr = scheduled_lr(
-            step,
-            args.lr_means,
-            args.lr_means_final,
-            lr_means_max_steps,
-            args.lr_means_delay_mult,
-        )
-        optimizers["means"].learning_rate = latest_means_lr
+        latest_lrs = {}
+        for name, schedule in lr_schedules.items():
+            lr = lr_for_step(schedule, step)
+            optimizers[name].learning_rate = lr
+            schedule["latest"] = float(lr)
+            latest_lrs[name] = float(lr)
         if step == 1 or step == args.steps or step % args.log_interval == 0:
-            means_lr_history.append({"step": int(step), "lr": float(latest_means_lr)})
+            for name, schedule in lr_schedules.items():
+                schedule["history"].append({"step": int(step), "lr": float(schedule["latest"])})
         view_id = (step - 1) % len(cameras)
         camera = cameras[view_id]
         target = targets[view_id]
@@ -1513,7 +1654,8 @@ def main() -> None:
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
                 f"step={step:04d} frame={camera.index:05d} "
-                f"loss={last_loss:.8f} means_lr={latest_means_lr:.8g} "
+                f"loss={last_loss:.8f} means_lr={latest_lrs['means']:.8g} "
+                f"opacity_lr={latest_lrs['opacity_logits']:.8g} "
                 f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
 
@@ -1647,16 +1789,7 @@ def main() -> None:
         "loss_function": "mlx.nn.losses.l1_loss",
         "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
         "image_outputs": "compare_frame_*.png and optional compare_eval_frame_*.png",
-        "learning_rate_schedule": {
-            "means": {
-                "initial": float(args.lr_means),
-                "final": None if args.lr_means_final is None else float(args.lr_means_final),
-                "delay_mult": float(args.lr_means_delay_mult),
-                "max_steps": int(lr_means_max_steps),
-                "latest": float(latest_means_lr),
-                "history": means_lr_history,
-            }
-        },
+        "learning_rate_schedule": lr_schedules,
         "initial_mean_loss": initial_mean_loss,
         "final_mean_loss": final_mean_loss,
         "last_viewspace_grad_norm": last_viewspace_grad_norm,

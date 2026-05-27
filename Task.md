@@ -1277,7 +1277,7 @@
   including Makefile controls and training summary diagnostics.
 - [x] Add held-out frame evaluation diagnostics with optional
   `compare_eval_frame_*.png` outputs and train/eval loss gap summaries.
-- [ ] Add optimizer learning-rate schedules for SH/features, opacity, scales,
+- [x] Add optimizer learning-rate schedules for SH/features, opacity, scales,
   and quats. Current non-position optimizers still use fixed Adam learning
   rates.
 - [ ] Decide whether to add an SSIM/DSSIM component or keep the scanner trainer
@@ -1330,7 +1330,7 @@
   After clone/split/prune/reset, clear or rebuild `grad2d`, `count`, and
   `radii` running stats instead of carrying stale pre-refine statistics into
   later steps.
-- [ ] Task 6.30B: Complete optimizer LR schedules for `features_dc`,
+- [x] Task 6.30B: Complete optimizer LR schedules for `features_dc`,
   `features_rest`, `opacity_logits`, `log_scales`, and `quats`, using
   gsplat-style defaults as the baseline while keeping CLI/Makefile overrides.
 - [ ] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
