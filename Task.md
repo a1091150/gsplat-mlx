@@ -952,6 +952,8 @@
   validated.
 - [ ] Validate that the exporter writes a nonempty `.spz` file and that the
   training path still works when export is disabled.
+- [ ] Defer scanner-scene SPZ export until Task 6.24 confirms `points.ply` and
+  scanner camera convention render in the expected positions.
 
 ## Task 6.21 - Scanner Dataset Camera/Image Loader Smoke
 - [x] Add `scripts/test/scanner_dataset_random_render_smoke.py`.
@@ -1011,3 +1013,45 @@
 - [x] Validate diagnostics on a short scanner random training run.
 - [ ] Use these diagnostics to judge camera convention before adding
   `points.ply` initialization.
+
+## Task 6.24 - Scanner `points.ply` Camera Alignment Render
+- [ ] Add a scanner dataset alignment script that reads both scanner cameras
+  and `points.ply`.
+- [ ] Use `/Users/yangdunfu/Documents/GitHub/fastgs_core/scripts/train_scanner_fastgs2.py`
+  as a reference for `points.ply` parsing, axis transform, color loading, and
+  camera/image pairing, but do not assume its convention is automatically
+  correct for gsplat_core.
+- [ ] Convert `points.ply` positions and RGB colors into gsplat_core Gaussian
+  parameters without training.
+- [ ] Initialize simple render-only Gaussian attributes:
+  means from points, small linear scales, identity/random quats, sigmoid
+  opacities, and RGB colors.
+- [ ] Render selected scanner frames through:
+  projection -> intersect tile -> intersect offset -> rasterize.
+- [ ] Save target image, point-cloud render, and side-by-side comparison PNGs
+  per selected frame.
+- [ ] Save debug metadata with camera `K`, `viewmat`, point count, visible
+  point/Gaussian count, intersection count, and render alpha stats.
+- [ ] Add a Makefile target for the alignment render smoke.
+- [ ] Use the rendered alignment previews to decide whether the FastGS scanner
+  axis transform/camera flip matches gsplat_core expectations.
+- [ ] If alignment is wrong, document candidate convention fixes instead of
+  proceeding to training or SPZ export.
+
+## Task 6.25 - Scanner Scene SPZ Export
+- [ ] Add SPZ export for scanner-scene Gaussians after Task 6.24 verifies
+  `points.ply` and camera alignment.
+- [ ] Keep this separate from Task 6.24 so render alignment and file export can
+  be debugged independently.
+- [ ] Detect whether the `spz` Python package is available in the
+  `fastgs_core` conda environment.
+- [ ] Export scanner-initialized or scanner-trained Gaussian attributes:
+  positions, scales/log-scales according to SPZ convention, normalized
+  quaternions, sigmoid opacities, and colors.
+- [ ] Document coordinate system assumptions, quaternion ordering, scale
+  convention, opacity convention, and color/SH convention before treating the
+  output as viewer-compatible.
+- [ ] Add a CLI flag and Makefile variable for writing scanner `.spz` output.
+- [ ] Validate that export disabled keeps training/render smoke unchanged.
+- [ ] Validate that export enabled writes a nonempty `.spz` file and reports
+  the exported Gaussian count.
