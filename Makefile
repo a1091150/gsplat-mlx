@@ -53,6 +53,10 @@ SCANNER_POINTS_TRAIN_FRAMES ?= 3
 SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
 SCANNER_POINTS_TRAIN_STEPS ?= 200
 SCANNER_POINTS_TRAIN_POINT_SCALE ?= 0.01
+SCANNER_POINTS_TRAIN_LR_MEANS ?= 0.002
+SCANNER_POINTS_TRAIN_LR_MEANS_FINAL ?= 0.0002
+SCANNER_POINTS_TRAIN_LR_MEANS_DELAY_MULT ?= 1.0
+SCANNER_POINTS_TRAIN_LR_MEANS_MAX_STEPS ?= $(SCANNER_POINTS_TRAIN_STEPS)
 SCANNER_POINTS_TRAIN_COLOR_MODE ?= sh
 SCANNER_POINTS_TRAIN_SH_DEGREE ?= 0
 SCANNER_POINTS_TRAIN_MAX_SH_DEGREE ?= 3
@@ -83,6 +87,15 @@ SCANNER_POINTS_SH_SCHEDULE_FLAGS += --sh-degree-start $(SCANNER_POINTS_TRAIN_SH_
 endif
 ifneq ($(strip $(SCANNER_POINTS_TRAIN_SH_DEGREE_TARGET)),)
 SCANNER_POINTS_SH_SCHEDULE_FLAGS += --sh-degree-target $(SCANNER_POINTS_TRAIN_SH_DEGREE_TARGET)
+endif
+
+SCANNER_POINTS_MEANS_LR_FLAGS = --lr-means $(SCANNER_POINTS_TRAIN_LR_MEANS)
+ifneq ($(strip $(SCANNER_POINTS_TRAIN_LR_MEANS_FINAL)),)
+SCANNER_POINTS_MEANS_LR_FLAGS += --lr-means-final $(SCANNER_POINTS_TRAIN_LR_MEANS_FINAL)
+endif
+SCANNER_POINTS_MEANS_LR_FLAGS += --lr-means-delay-mult $(SCANNER_POINTS_TRAIN_LR_MEANS_DELAY_MULT)
+ifneq ($(strip $(SCANNER_POINTS_TRAIN_LR_MEANS_MAX_STEPS)),)
+SCANNER_POINTS_MEANS_LR_FLAGS += --lr-means-max-steps $(SCANNER_POINTS_TRAIN_LR_MEANS_MAX_STEPS)
 endif
 
 SCANNER_POINTS_REFINE_FLAGS =
@@ -129,6 +142,7 @@ help:
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
+	@printf "    Optional: SCANNER_POINTS_TRAIN_LR_MEANS_FINAL/DELAY_MULT/MAX_STEPS configure means LR decay.\n"
 	@printf "    Optional: SCANNER_POINTS_REFINE_ENABLED=1 plus SCANNER_POINTS_REFINE_* thresholds enable gsplat-style refinement.\n"
 	@printf "  make codex-projection-guardrails  Check projection VJP full-GPU support boundaries.\n"
 	@printf "  make clean        Remove Xcode/build folders and Python packaging artifacts.\n"
@@ -264,6 +278,7 @@ codex-scanner-points-train-spz:
 		--max-points $(SCANNER_POINTS_TRAIN_MAX_POINTS) \
 		--steps $(SCANNER_POINTS_TRAIN_STEPS) \
 		--point-scale $(SCANNER_POINTS_TRAIN_POINT_SCALE) \
+		$(SCANNER_POINTS_MEANS_LR_FLAGS) \
 		--color-mode $(SCANNER_POINTS_TRAIN_COLOR_MODE) \
 		--sh-degree $(SCANNER_POINTS_TRAIN_SH_DEGREE) \
 		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE) \

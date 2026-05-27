@@ -1268,8 +1268,11 @@
 - [x] Add progressive SH degree scheduling so SH training can increase the
   active degree during the run while keeping `--max-sh-degree` as model
   capacity.
-- [ ] Add optimizer learning-rate schedules for means, SH/features, opacity,
-  scales, and quats. Current trainer uses fixed Adam learning rates.
+- [x] Add first optimizer learning-rate schedule for `means` / positions,
+  including Makefile controls and training summary diagnostics.
+- [ ] Add optimizer learning-rate schedules for SH/features, opacity, scales,
+  and quats. Current non-position optimizers still use fixed Adam learning
+  rates.
 - [ ] Decide whether to add an SSIM/DSSIM component or keep the scanner trainer
   intentionally L1-only for this MLX smoke path.
 - [ ] Add optional background/mask handling if scanner frames require it.

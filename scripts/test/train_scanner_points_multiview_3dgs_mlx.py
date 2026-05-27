@@ -1022,6 +1022,27 @@ def active_sh_degree_for_step(start: int, target: int, interval: int, step: int)
     return int(min(target, start + max(step - 1, 0) // interval))
 
 
+def scheduled_lr(
+    step: int,
+    initial_lr: float,
+    final_lr: float | None,
+    max_steps: int,
+    delay_mult: float,
+) -> float:
+    if final_lr is None:
+        return float(initial_lr)
+    if initial_lr <= 0.0 or final_lr <= 0.0:
+        raise ValueError("scheduled learning rates must be positive")
+    if max_steps <= 0:
+        return float(final_lr)
+    t = float(np.clip(step / max_steps, 0.0, 1.0))
+    lr = float(np.exp(np.log(initial_lr) * (1.0 - t) + np.log(final_lr) * t))
+    if delay_mult < 1.0:
+        delay_rate = delay_mult + (1.0 - delay_mult) * np.sin(0.5 * np.pi * t)
+        lr *= float(delay_rate)
+    return lr
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Downloads/2026_05_04_16_51_29"))
@@ -1041,6 +1062,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=37)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--lr-means", type=float, default=2.0e-3)
+    parser.add_argument("--lr-means-final", type=float, default=None)
+    parser.add_argument("--lr-means-delay-mult", type=float, default=1.0)
+    parser.add_argument("--lr-means-max-steps", type=int, default=None)
     parser.add_argument("--lr-colors", type=float, default=2.0e-2)
     parser.add_argument("--lr-sh-rest", type=float, default=None)
     parser.add_argument("--lr-opacity", type=float, default=5.0e-3)
@@ -1112,6 +1136,15 @@ def main() -> None:
         raise ValueError("--refine-stop-iter must be greater than --refine-start-iter")
     if args.refine_scene_scale <= 0.0:
         raise ValueError("--refine-scene-scale must be positive")
+    if args.lr_means <= 0.0:
+        raise ValueError("--lr-means must be positive")
+    if args.lr_means_final is not None and args.lr_means_final <= 0.0:
+        raise ValueError("--lr-means-final must be positive")
+    if args.lr_means_delay_mult <= 0.0 or args.lr_means_delay_mult > 1.0:
+        raise ValueError("--lr-means-delay-mult must be in (0, 1]")
+    lr_means_max_steps = args.steps if args.lr_means_max_steps is None else args.lr_means_max_steps
+    if lr_means_max_steps <= 0:
+        raise ValueError("--lr-means-max-steps must be positive")
     lr_sh_rest = args.lr_colors if args.lr_sh_rest is None else args.lr_sh_rest
     strategy_config = ScannerDefaultStrategyConfig(
         enabled=args.refine_enabled,
@@ -1235,7 +1268,19 @@ def main() -> None:
     last_loss = None
     last_viewspace_grad = None
     last_viewspace_grad_norm = None
+    means_lr_history = []
+    latest_means_lr = args.lr_means
     for step in range(1, args.steps + 1):
+        latest_means_lr = scheduled_lr(
+            step,
+            args.lr_means,
+            args.lr_means_final,
+            lr_means_max_steps,
+            args.lr_means_delay_mult,
+        )
+        optimizers["means"].learning_rate = latest_means_lr
+        if step == 1 or step == args.steps or step % args.log_interval == 0:
+            means_lr_history.append({"step": int(step), "lr": float(latest_means_lr)})
         view_id = (step - 1) % len(cameras)
         camera = cameras[view_id]
         target = targets[view_id]
@@ -1324,7 +1369,8 @@ def main() -> None:
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
                 f"step={step:04d} frame={camera.index:05d} "
-                f"loss={last_loss:.8f} viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
+                f"loss={last_loss:.8f} means_lr={latest_means_lr:.8g} "
+                f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
 
     if args.color_mode == "rgb":
@@ -1409,6 +1455,16 @@ def main() -> None:
         "loss_function": "mlx.nn.losses.l1_loss",
         "psnr_metric": "computed from render-target MSE for image-quality diagnostics",
         "image_outputs": "compare_frame_*.png only by default",
+        "learning_rate_schedule": {
+            "means": {
+                "initial": float(args.lr_means),
+                "final": None if args.lr_means_final is None else float(args.lr_means_final),
+                "delay_mult": float(args.lr_means_delay_mult),
+                "max_steps": int(lr_means_max_steps),
+                "latest": float(latest_means_lr),
+                "history": means_lr_history,
+            }
+        },
         "initial_mean_loss": initial_mean_loss,
         "final_mean_loss": final_mean_loss,
         "last_viewspace_grad_norm": last_viewspace_grad_norm,
