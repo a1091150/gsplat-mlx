@@ -1238,9 +1238,10 @@
   - SH `features_dc/features_rest`
 - Validate `viewspace_points` shape follows the updated Gaussian count on the
   next step.
-- Validate SPZ export after topology changes for both RGB and SH modes.
+- Defer SPZ export validation after topology changes until SPZ/viewer work is
+  resumed.
 - Keep image quality expectations weak at first; the primary check is finite
-  loss, nonzero gradient stats, correct counts, and nonempty SPZ output.
+  loss, nonzero gradient stats, and correct counts.
 
 ## Task 6.29 - Scanner Trainer Loss and Remaining gsplat Alignment
 
@@ -1253,6 +1254,10 @@
   loss function in `training_summary.json`.
 
 ### Remaining After-Training Strategy Alignment
+- [ ] Align scanner trainer refine-state reset with gsplat `DefaultStrategy`:
+  after grow/prune/refine steps, clear or rebuild running `grad2d`, `count`,
+  and optional `radii` stats so stale gradients do not drive later topology
+  changes.
 - [ ] Validate clone/split/prune/reset thresholds on long scanner training runs.
 - [ ] Implement real `absgrad` behavior instead of only preserving the CLI/config
   option.
@@ -1280,6 +1285,12 @@
 - [ ] Add optional background/mask handling if scanner frames require it.
 - [ ] Keep camera optimization and appearance embeddings out of scope until the
   low-level gsplat_core path is stable.
+- [ ] Improve dataloader/batching beyond the current simple round-robin
+  single-frame loop: shuffle frames, support camera/image mini-batches, and
+  preserve explicit train/eval splits.
+- [ ] Improve initialization beyond `points.ply` plus fixed scale/opacity:
+  scene scale, world normalization, camera normalization, and SfM-style scale
+  initialization should be validated against gsplat behavior.
 
 ### Remaining Low-Level gsplat API Parity
 - [ ] Implement packed projection/rasterize forward paths if dense-only training
@@ -1291,7 +1302,9 @@
 - [ ] Continue CUDA/PyTorch parity through exported `.npz` references for forward
   and backward edge cases.
 
-### Remaining SPZ and Viewer Alignment
+### Paused SPZ and Viewer Alignment
+- SPZ/viewer work is intentionally paused. Do not schedule new SPZ tasks until
+  training/refine/loss behavior is more closely aligned with gsplat.
 - [x] Add SPZ export diagnostics to `training_summary.json` for position,
   transformed SPZ position, log-scale, opacity, quaternion norm, color, and SH
   coefficient ranges.
@@ -1301,3 +1314,46 @@
   conventions against the viewer and, where possible, gsplat/PyTorch output.
 - [ ] Decide whether SPZ export should store trained SH degree exactly or pad /
   clamp to viewer-supported degrees.
+
+## Task 6.30 - Non-SPZ gsplat Training Alignment Roadmap
+
+### Scope
+- Continue scanner training alignment while explicitly skipping new SPZ/viewer
+  tasks.
+- Use `submodules/gsplat/gsplat/strategy/default.py` and
+  `submodules/gsplat/examples/simple_trainer.py` as the main source references.
+- Prioritize correctness and long-run training behavior before packed/sparse
+  performance features.
+
+### Priority Order
+- [ ] Task 6.30A: Refine-state reset parity with gsplat `DefaultStrategy`.
+  After clone/split/prune/reset, clear or rebuild `grad2d`, `count`, and
+  `radii` running stats instead of carrying stale pre-refine statistics into
+  later steps.
+- [ ] Task 6.30B: Complete optimizer LR schedules for `features_dc`,
+  `features_rest`, `opacity_logits`, `log_scales`, and `quats`, using
+  gsplat-style defaults as the baseline while keeping CLI/Makefile overrides.
+- [ ] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
+  a selectable smoke-test mode.
+- [ ] Task 6.30D: Implement real `absgrad` accumulation for
+  `viewspace_points`, matching gsplat's absolute-gradient strategy option.
+- [ ] Task 6.30E: Add focused refine validation for
+  `refine_scale2d_stop_iter > 0`, `revised_opacity`, scale pruning, and opacity
+  reset timing.
+- [ ] Task 6.30F: Improve scanner dataloader behavior with frame shuffling,
+  mini-batch camera/image support, and explicit train/eval split controls.
+- [ ] Task 6.30G: Improve scene initialization with scene scale estimation,
+  normalization, and point-neighborhood scale initialization.
+- [ ] Task 6.30H: Keep packed paths, sparse gradients, and visible Adam as later
+  performance tasks after dense training quality is stable.
+- [ ] Task 6.30I: Keep camera optimization, appearance embedding, exposure,
+  background, and mask handling as later trainer-level tasks.
+- [ ] Task 6.30J: Expand CUDA gsplat parity from small `.npz` references to
+  longer fixed-seed training comparisons once the trainer behavior stabilizes.
+
+### Explicitly Deferred
+- SPZ/viewer validation and SPZ convention changes.
+- Packed/sparse/visible Adam.
+- Camera optimization, appearance embeddings, exposure optimization,
+  background randomization, and mask training.
+- MCMC relocation/noise.
