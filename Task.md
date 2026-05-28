@@ -1295,6 +1295,9 @@
   initialization should be validated against gsplat behavior.
 
 ### Remaining Low-Level gsplat API Parity
+- Temporary Metal/CUDA low-level parity tracking lives in `Task_Metal.md`.
+  Keep this section as trainer-facing dependency notes until the temporary file
+  is folded back manually.
 - [ ] Implement packed projection/rasterize forward paths if dense-only training
   becomes insufficient.
 - [ ] Implement `rasterize_to_indices_3dgs` if an index-only render/debug path is
