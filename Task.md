@@ -1263,10 +1263,12 @@
   rasterize-style `v_means2d_abs` / `viewspace_points` absolute-gradient array
   is provided; record fallback diagnostics when training only has signed
   `viewspace_points` gradients.
-- [ ] Add a dedicated smoke for `refine_scale2d_stop_iter > 0` so 2D radius
+- [x] Add a dedicated smoke for `refine_scale2d_stop_iter > 0` so 2D radius
   split/prune is exercised.
-- [ ] Validate `revised_opacity` split on longer training runs and decide whether
-  it should be exposed as a recommended scanner setting.
+- [x] Validate `revised_opacity` split formula in a focused strategy branch
+  debug script.
+- [ ] Validate `revised_opacity` on longer training runs and decide whether it
+  should be exposed as a recommended scanner setting.
 - [ ] Keep MCMC relocation/noise, distributed packed paths, sparse gradients, and
   visible Adam outside the current first scanner trainer implementation unless a
   later task explicitly brings them in.
@@ -1335,19 +1337,24 @@
   After clone/split/prune/reset, clear or rebuild `grad2d`, `count`, and
   `radii` running stats instead of carrying stale pre-refine statistics into
   later steps.
+  Debug: `scripts/test/refine_state_reset_debug.py`.
 - [x] Task 6.30B: Complete optimizer LR schedules for `features_dc`,
   `features_rest`, `opacity_logits`, `log_scales`, and `quats`, using
   gsplat-style defaults as the baseline while keeping CLI/Makefile overrides.
+  Debug: `scripts/test/optimizer_lr_schedule_debug.py`.
 - [x] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
   a selectable smoke-test mode.
+  Debug: `scripts/test/image_loss_debug.py`.
 - [x] Task 6.30D: Implement real `absgrad` accumulation for
   `viewspace_points`, matching gsplat's absolute-gradient strategy option.
   Current code supports a provided absolute-gradient array and reports
   `absgrad_requested_signed_grad_fallback` until the full training loop wires
   rasterize backward `v_means2d_abs` into `update_state(...)`.
-- [ ] Task 6.30E: Add focused refine validation for
+  Debug: `scripts/test/absgrad_refine_debug.py`.
+- [x] Task 6.30E: Add focused refine validation for
   `refine_scale2d_stop_iter > 0`, `revised_opacity`, scale pruning, and opacity
   reset timing.
+  Debug: `scripts/test/refine_strategy_branches_debug.py`.
 - [ ] Task 6.30F: Improve scanner dataloader behavior with frame shuffling,
   mini-batch camera/image support, and explicit train/eval split controls.
 - [ ] Task 6.30G: Improve scene initialization with scene scale estimation,
