@@ -7,6 +7,7 @@ RANDOM_3DGS_SEED ?= 7
 RANDOM_3DGS_N ?= 1024
 RANDOM_3DGS_WIDTH ?= 512
 RANDOM_3DGS_HEIGHT ?= 512
+
 TINY_TRAIN_OUT ?= outputs/tiny_3dgs_train
 TINY_TRAIN_STEPS ?= 40
 TINY_TRAIN_N ?= 1024
@@ -18,6 +19,7 @@ TINY_MULTIVIEW_N ?= 1024
 TINY_MULTIVIEW_WIDTH ?= 512
 TINY_MULTIVIEW_HEIGHT ?= 512
 TINY_MULTIVIEW_VIEWS ?= 3
+
 SCANNER_DATASET ?= /Users/yangdunfu/Downloads/2026_05_04_16_51_29
 SCANNER_SMOKE_OUT ?= outputs/scanner_dataset_random_render
 SCANNER_SMOKE_WIDTH ?= 512
@@ -31,7 +33,8 @@ SCANNER_TRAIN_HEIGHT ?= 512
 SCANNER_TRAIN_N ?= 1024
 SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
-SCANNER_TRAIN_STEPS ?= 200
+SCANNER_TRAIN_STEPS ?= 2000
+
 SPZ_VARIANTS_OUT ?= outputs/spz_variants
 SPZ_VARIANTS_PREFIX ?= scanner_points
 SPZ_VARIANTS_POSITION_MODES ?= scanner
@@ -39,6 +42,7 @@ SPZ_VARIANTS_SCALE_MODES ?= direct
 SPZ_VARIANTS_ROTATION_MODES ?= position_axis
 SPZ_VARIANTS_QUAT_ORDERS ?= xyzw
 SPZ_VARIANTS_COLOR_MODES ?= sh
+
 SCANNER_ALIGN_OUT ?= outputs/scanner_points_alignment
 SCANNER_ALIGN_WIDTH ?= 512
 SCANNER_ALIGN_HEIGHT ?= 512
@@ -66,7 +70,7 @@ SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
 SCANNER_POINTS_EVAL_FRAMES ?= 0
 SCANNER_POINTS_EVAL_FRAME_STEP ?= $(SCANNER_POINTS_TRAIN_FRAME_STEP)
 SCANNER_POINTS_EVAL_START_INDEX ?=
-SCANNER_POINTS_TRAIN_STEPS ?= 15000
+SCANNER_POINTS_TRAIN_STEPS ?= 2000
 SCANNER_POINTS_TRAIN_BATCH_SIZE ?= 1
 SCANNER_POINTS_TRAIN_FRAME_SAMPLING ?= shuffle
 SCANNER_POINTS_TRAIN_FRAME_SHUFFLE_SEED ?= 7956
@@ -229,7 +233,7 @@ ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -249,6 +253,7 @@ help:
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
+	@printf "  make codex-scanner-points-train-spz-refine  Train points.ply Gaussians with refine/densify enabled and export SPZ.\n"
 	@printf "    Optional: SCANNER_POINTS_EVAL_FRAMES/FRAME_STEP/START_INDEX enable held-out eval compares.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_BATCH_SIZE/FRAME_SAMPLING/FRAME_SHUFFLE_SEED configure frame sampling.\n"
@@ -415,6 +420,12 @@ codex-scanner-points-train-spz:
 		--max-sh-degree $(SCANNER_POINTS_TRAIN_MAX_SH_DEGREE) \
 		$(SCANNER_POINTS_SH_SCHEDULE_FLAGS) \
 		$(SCANNER_POINTS_REFINE_FLAGS)
+
+codex-scanner-points-train-spz-refine: SCANNER_POINTS_TRAIN_OUT = outputs/scanner_points_multiview_train_refine
+codex-scanner-points-train-spz-refine: SCANNER_POINTS_TRAIN_SPZ = outputs/scanner_points_multiview_train_refine/trained_scanner_points.spz
+codex-scanner-points-train-spz-refine: SCANNER_POINTS_TRAIN_MODEL_NPZ = outputs/scanner_points_multiview_train_refine/trained_model_params.npz
+codex-scanner-points-train-spz-refine: SCANNER_POINTS_REFINE_FLAGS = --refine-enabled --refine-prune-opa $(SCANNER_POINTS_REFINE_PRUNE_OPA) --refine-grow-grad2d $(SCANNER_POINTS_REFINE_GROW_GRAD2D) --refine-grow-scale3d $(SCANNER_POINTS_REFINE_GROW_SCALE3D) --refine-grow-scale2d $(SCANNER_POINTS_REFINE_GROW_SCALE2D) --refine-prune-scale3d $(SCANNER_POINTS_REFINE_PRUNE_SCALE3D) --refine-prune-scale2d $(SCANNER_POINTS_REFINE_PRUNE_SCALE2D) --refine-scale2d-stop-iter $(SCANNER_POINTS_REFINE_SCALE2D_STOP_ITER) --refine-start-iter $(SCANNER_POINTS_REFINE_START_ITER) --refine-stop-iter $(SCANNER_POINTS_REFINE_STOP_ITER) --refine-reset-every $(SCANNER_POINTS_REFINE_RESET_EVERY) --refine-every $(SCANNER_POINTS_REFINE_EVERY) --refine-pause-after-reset $(SCANNER_POINTS_REFINE_PAUSE_AFTER_RESET) --refine-scene-scale $(SCANNER_POINTS_REFINE_SCENE_SCALE) --refine-revised-opacity
+codex-scanner-points-train-spz-refine: codex-scanner-points-train-spz
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
