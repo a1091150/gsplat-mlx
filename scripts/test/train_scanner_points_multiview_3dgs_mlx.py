@@ -1199,8 +1199,35 @@ def positions_to_spz(means: np.ndarray) -> np.ndarray:
     return out
 
 
-def quats_to_spz(quats: np.ndarray) -> np.ndarray:
-    axis3 = np.array(
+def gsplat_to_spz_axis() -> np.ndarray:
+    return np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+
+def scales_to_spz(log_scales: np.ndarray, mode: str) -> np.ndarray:
+    if mode == "direct":
+        return log_scales.astype(np.float32)
+    if mode == "scanner_axis":
+        out = np.empty_like(log_scales, dtype=np.float32)
+        out[:, 0] = log_scales[:, 0]
+        out[:, 1] = log_scales[:, 2]
+        out[:, 2] = log_scales[:, 1]
+        return out
+    raise ValueError(f"Unsupported SPZ scale mode: {mode}")
+
+
+def quats_to_spz(quats: np.ndarray, mode: str) -> np.ndarray:
+    if mode == "direct":
+        return quats / np.clip(np.linalg.norm(quats, axis=1, keepdims=True), 1.0e-8, None)
+
+    position_axis = gsplat_to_spz_axis()
+    fastgs_axis = np.array(
         [
             [1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0],
@@ -1209,7 +1236,22 @@ def quats_to_spz(quats: np.ndarray) -> np.ndarray:
         dtype=np.float32,
     )
     rot = quat_wxyz_to_rotmat(quats)
-    return rotmat_to_quat_wxyz(axis3 @ rot @ axis3.T)
+    if mode == "position_axis":
+        return rotmat_to_quat_wxyz(position_axis @ rot)
+    if mode == "fastgs_conjugate":
+        return rotmat_to_quat_wxyz(fastgs_axis @ rot @ fastgs_axis.T)
+    if mode == "position_conjugate":
+        return rotmat_to_quat_wxyz(position_axis @ rot @ position_axis.T)
+    raise ValueError(f"Unsupported SPZ rotation mode: {mode}")
+
+
+def quats_to_spz_storage(quats_wxyz: np.ndarray, order: str) -> np.ndarray:
+    q = quats_wxyz / np.clip(np.linalg.norm(quats_wxyz, axis=1, keepdims=True), 1.0e-8, None)
+    if order == "wxyz":
+        return q.astype(np.float32)
+    if order == "xyzw":
+        return q[:, [1, 2, 3, 0]].astype(np.float32)
+    raise ValueError(f"Unsupported SPZ quaternion order: {order}")
 
 
 def export_trained_spz(
@@ -1217,6 +1259,10 @@ def export_trained_spz(
     model: Tiny3DGSModel | ScannerPointsSHModel,
     color_mode: str,
     sh_degree: int,
+    spz_scale_mode: str,
+    spz_rotation_mode: str,
+    spz_quat_order: str,
+    spz_color_mode: str,
 ) -> int:
     try:
         import spz
@@ -1242,21 +1288,33 @@ def export_trained_spz(
     cloud = spz.GaussianCloud()
     cloud.antialiased = True
     cloud.positions = positions_to_spz(means).reshape(-1).astype(np.float32)
-    cloud.scales = log_scales.reshape(-1).astype(np.float32)
-    cloud.rotations = quats_to_spz(quats).reshape(-1).astype(np.float32)
+    cloud.scales = scales_to_spz(log_scales, spz_scale_mode).reshape(-1).astype(np.float32)
+    cloud.rotations = quats_to_spz_storage(quats_to_spz(quats, spz_rotation_mode), spz_quat_order).reshape(-1)
     cloud.alphas = opacity_logits.reshape(-1).astype(np.float32)
     if color_mode == "rgb":
         colors = np.asarray(model.colors[0, 0], dtype=np.float32)
-        cloud.colors = np.clip(colors, 0.0, 1.0).reshape(-1).astype(np.float32)
+        if spz_color_mode == "sh":
+            cloud.colors = ((np.clip(colors, 0.0, 1.0) - 0.5) / SH_C0).reshape(-1).astype(np.float32)
+        elif spz_color_mode == "raw_rgb":
+            cloud.colors = np.clip(colors, 0.0, 1.0).reshape(-1).astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported SPZ color mode: {spz_color_mode}")
         cloud.sh_degree = 0
         cloud.sh = np.array([], dtype=np.float32)
     elif color_mode == "sh":
         features_dc = np.asarray(model.features_dc[0], dtype=np.float32)
-        active_rest = sh_coeff_count(sh_degree) - 1
-        features_rest = np.asarray(model.features_rest[0, :, :active_rest, :], dtype=np.float32)
         cloud.colors = features_dc.reshape(-1).astype(np.float32)
-        cloud.sh_degree = int(sh_degree)
-        cloud.sh = features_rest.reshape(-1).astype(np.float32)
+        if spz_color_mode == "sh":
+            active_rest = sh_coeff_count(sh_degree) - 1
+            features_rest = np.asarray(model.features_rest[0, :, :active_rest, :], dtype=np.float32)
+            cloud.sh_degree = int(sh_degree)
+            cloud.sh = features_rest.reshape(-1).astype(np.float32)
+        elif spz_color_mode == "raw_rgb":
+            cloud.colors = np.clip(0.5 + SH_C0 * features_dc, 0.0, 1.0).reshape(-1).astype(np.float32)
+            cloud.sh_degree = 0
+            cloud.sh = np.array([], dtype=np.float32)
+        else:
+            raise ValueError(f"Unsupported SPZ color mode: {spz_color_mode}")
     else:
         raise ValueError(f"Unsupported color mode: {color_mode}")
 
@@ -1293,6 +1351,10 @@ def spz_export_diagnostics(
     model: Tiny3DGSModel | ScannerPointsSHModel,
     color_mode: str,
     sh_degree: int,
+    spz_scale_mode: str,
+    spz_rotation_mode: str,
+    spz_quat_order: str,
+    spz_color_mode: str,
 ) -> dict:
     if color_mode == "rgb":
         mx.eval(model.means, model.log_scales, model.normalized_quats, model.color_logits, model.opacity_logits)
@@ -1309,28 +1371,47 @@ def spz_export_diagnostics(
     means = np.asarray(model.means[0], dtype=np.float32)
     spz_positions = positions_to_spz(means)
     log_scales = np.asarray(model.log_scales[0], dtype=np.float32)
+    spz_log_scales = scales_to_spz(log_scales, spz_scale_mode)
     quats = np.asarray(model.normalized_quats[0], dtype=np.float32)
-    spz_quats = quats_to_spz(quats)
+    spz_quats = quats_to_spz(quats, spz_rotation_mode)
+    spz_stored_quats = quats_to_spz_storage(spz_quats, spz_quat_order)
     opacity_logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
     opacities = 1.0 / (1.0 + np.exp(-opacity_logits))
 
     diagnostics = {
         "axis_mode": "scanner",
         "position_convention": "[x, -z, y]",
-        "rotation_convention": "trained wxyz quats transformed by scanner axis3",
-        "scale_convention": "trained log_scales",
+        "rotation_convention": {
+            "direct": "trained wxyz quats",
+            "position_axis": "trained wxyz quats converted with position axis: R_spz = A @ R",
+            "fastgs_conjugate": "trained wxyz quats transformed with legacy FastGS conjugation",
+            "position_conjugate": "trained wxyz quats transformed with position-axis conjugation",
+        }[spz_rotation_mode],
+        "rotation_mode": spz_rotation_mode,
+        "quat_order": spz_quat_order,
+        "color_export_mode": spz_color_mode,
+        "scale_convention": (
+            "trained log_scales"
+            if spz_scale_mode == "direct"
+            else "trained log_scales permuted from [sx, sy, sz] to [sx, sz, sy]"
+        ),
+        "scale_mode": spz_scale_mode,
         "opacity_convention": "trained opacity logits",
         "gaussian_count": int(means.shape[0]),
         "trained_position_min_max": vector_axis_min_max(means),
         "spz_position_min_max": vector_axis_min_max(spz_positions),
         "log_scale": array_min_mean_max(log_scales),
         "scale": array_min_mean_max(np.exp(log_scales)),
+        "trained_log_scale_axis_min_max": vector_axis_min_max(log_scales),
+        "spz_log_scale_axis_min_max": vector_axis_min_max(spz_log_scales),
+        "spz_scale_axis_min_max": vector_axis_min_max(np.exp(spz_log_scales)),
         "opacity_logit": array_min_mean_max(opacity_logits),
         "opacity": array_min_mean_max(opacities),
         "trained_quat_norm": array_min_mean_max(np.linalg.norm(quats, axis=-1)),
         "spz_quat_norm": array_min_mean_max(np.linalg.norm(spz_quats, axis=-1)),
+        "spz_stored_quat_norm": array_min_mean_max(np.linalg.norm(spz_stored_quats, axis=-1)),
         "color_mode": color_mode,
-        "sh_degree": int(sh_degree) if color_mode == "sh" else 0,
+        "sh_degree": int(sh_degree) if color_mode == "sh" and spz_color_mode == "sh" else 0,
     }
     if color_mode == "rgb":
         colors = np.asarray(model.colors[0, 0], dtype=np.float32)
@@ -1343,7 +1424,7 @@ def spz_export_diagnostics(
         )
     else:
         features_dc = np.asarray(model.features_dc[0], dtype=np.float32)
-        active_rest = sh_coeff_count(sh_degree) - 1
+        active_rest = sh_coeff_count(sh_degree) - 1 if spz_color_mode == "sh" else 0
         features_rest = np.asarray(model.features_rest[0, :, :active_rest, :], dtype=np.float32)
         diagnostics.update(
             {
@@ -1355,6 +1436,52 @@ def spz_export_diagnostics(
             }
         )
     return diagnostics
+
+
+def save_model_parameters_npz(
+    path: Path,
+    model: Tiny3DGSModel | ScannerPointsSHModel,
+    color_mode: str,
+    active_sh_degree: int,
+    max_sh_degree: int,
+    summary: dict,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if color_mode == "rgb":
+        mx.eval(model.means, model.normalized_quats, model.log_scales, model.color_logits, model.opacity_logits)
+        payload = {
+            "color_mode": np.array("rgb", dtype=np.str_),
+            "active_sh_degree": np.array(active_sh_degree, dtype=np.int32),
+            "max_sh_degree": np.array(max_sh_degree, dtype=np.int32),
+            "means": np.asarray(model.means, dtype=np.float32),
+            "quats_wxyz": np.asarray(model.normalized_quats, dtype=np.float32),
+            "log_scales": np.asarray(model.log_scales, dtype=np.float32),
+            "color_logits": np.asarray(model.color_logits, dtype=np.float32),
+            "opacity_logits": np.asarray(model.opacity_logits, dtype=np.float32),
+            "summary_json": np.array(json.dumps(summary), dtype=np.str_),
+        }
+    else:
+        mx.eval(
+            model.means,
+            model.normalized_quats,
+            model.log_scales,
+            model.features_dc,
+            model.features_rest,
+            model.opacity_logits,
+        )
+        payload = {
+            "color_mode": np.array("sh", dtype=np.str_),
+            "active_sh_degree": np.array(active_sh_degree, dtype=np.int32),
+            "max_sh_degree": np.array(max_sh_degree, dtype=np.int32),
+            "means": np.asarray(model.means, dtype=np.float32),
+            "quats_wxyz": np.asarray(model.normalized_quats, dtype=np.float32),
+            "log_scales": np.asarray(model.log_scales, dtype=np.float32),
+            "features_dc": np.asarray(model.features_dc, dtype=np.float32),
+            "features_rest": np.asarray(model.features_rest, dtype=np.float32),
+            "opacity_logits": np.asarray(model.opacity_logits, dtype=np.float32),
+            "summary_json": np.array(json.dumps(summary), dtype=np.str_),
+        }
+    np.savez_compressed(path, **payload)
 
 
 def opacity_diagnostics(model: Tiny3DGSModel | ScannerPointsSHModel) -> dict:
@@ -1446,6 +1573,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Downloads/2026_05_04_16_51_29"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/scanner_points_multiview_train"))
     parser.add_argument("--out-spz", type=Path, default=None)
+    parser.add_argument("--out-model-npz", type=Path, default=None)
+    parser.add_argument("--spz-scale-mode", choices=("direct", "scanner_axis"), default="direct")
+    parser.add_argument(
+        "--spz-rotation-mode",
+        choices=("direct", "position_axis", "fastgs_conjugate", "position_conjugate"),
+        default="position_axis",
+    )
+    parser.add_argument("--spz-quat-order", choices=("wxyz", "xyzw"), default="xyzw")
+    parser.add_argument("--spz-color-mode", choices=("sh", "raw_rgb"), default="sh")
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--tile-size", type=int, default=16)
@@ -2036,8 +2172,25 @@ def main() -> None:
 
     out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanner_points.spz"
     export_sh_degree = active_sh_degree if args.color_mode == "sh" else args.sh_degree
-    spz_diagnostics = spz_export_diagnostics(model, args.color_mode, export_sh_degree)
-    exported_gaussians = export_trained_spz(out_spz, model, args.color_mode, export_sh_degree)
+    spz_diagnostics = spz_export_diagnostics(
+        model,
+        args.color_mode,
+        export_sh_degree,
+        args.spz_scale_mode,
+        args.spz_rotation_mode,
+        args.spz_quat_order,
+        args.spz_color_mode,
+    )
+    exported_gaussians = export_trained_spz(
+        out_spz,
+        model,
+        args.color_mode,
+        export_sh_degree,
+        args.spz_scale_mode,
+        args.spz_rotation_mode,
+        args.spz_quat_order,
+        args.spz_color_mode,
+    )
     spz_size = out_spz.stat().st_size
     if spz_size <= 0:
         raise AssertionError(f"SPZ output is empty: {out_spz}")
@@ -2137,9 +2290,13 @@ def main() -> None:
         "spz": str(out_spz),
         "spz_file_size_bytes": spz_size,
         "spz_position_convention": "[x, -z, y]",
-        "spz_scale_convention": "trained log_scales",
+        "spz_scale_mode": args.spz_scale_mode,
+        "spz_scale_convention": spz_diagnostics["scale_convention"],
         "spz_opacity_convention": "trained opacity logits",
-        "spz_rotation_convention": "trained wxyz quats transformed by scanner axis3",
+        "spz_rotation_mode": args.spz_rotation_mode,
+        "spz_rotation_convention": spz_diagnostics["rotation_convention"],
+        "spz_quat_order": args.spz_quat_order,
+        "spz_color_mode": args.spz_color_mode,
         "spz_export_diagnostics": spz_diagnostics,
         "color_mode": args.color_mode,
         "color_path": "rgb_logits" if args.color_mode == "rgb" else "spherical_harmonics",
@@ -2179,6 +2336,16 @@ def main() -> None:
         "frame_summaries": frame_summaries,
         "eval_frame_summaries": eval_frame_summaries,
     }
+    out_model_npz = args.out_model_npz if args.out_model_npz is not None else args.out_dir / "trained_model_params.npz"
+    summary["model_npz"] = str(out_model_npz)
+    save_model_parameters_npz(
+        out_model_npz,
+        model,
+        args.color_mode,
+        active_sh_degree,
+        args.max_sh_degree,
+        summary,
+    )
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     out_spz.with_suffix(".json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

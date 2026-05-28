@@ -1311,11 +1311,37 @@
   and backward edge cases.
 
 ### Paused SPZ and Viewer Alignment
-- SPZ/viewer work is intentionally paused. Do not schedule new SPZ tasks until
-  training/refine/loss behavior is more closely aligned with gsplat.
+- SPZ/viewer work resumed for Task 6.31 because PNG render and SPZ viewer
+  output differ after training.
 - [x] Add SPZ export diagnostics to `training_summary.json` for position,
   transformed SPZ position, log-scale, opacity, quaternion norm, color, and SH
   coefficient ranges.
+- [x] Task 6.31: Add SPZ convention diagnostics and explicit scale/rotation
+  export modes. The first scale-only attempt used `spz_scale_mode=scanner_axis`,
+  but viewer output did not visibly change. Current default uses the exact
+  coordinate transform pair: `spz_scale_mode=direct` and
+  `spz_rotation_mode=position_axis`, meaning SPZ positions use `[x, -z, y]`,
+  scales stay in trained local-axis order, and rotations use `R_spz = A @ R`.
+  Legacy `fastgs_conjugate`, `position_conjugate`, and `direct` rotation modes
+  remain available for comparison. Debug:
+  `scripts/test/spz_convention_debug.py`.
+- [x] Task 6.31B: Add saved points-training model parameter dumps and an
+  independent SPZ variant exporter. `train_scanner_points_multiview_3dgs_mlx.py`
+  now writes `trained_model_params.npz`; `export_spz_variants_from_model_npz.py`
+  can export multiple SPZ files from the same fixed points.ply-trained
+  parameters without retraining. Variants cover position mode, scale axis mode,
+  rotation transform, quaternion storage order (`wxyz` vs `xyzw`), and color
+  convention (`sh`, and raw RGB). This is needed because
+  `submodules/spz` documents GaussianCloud rotations as `xyzw`, while the
+  low-level packing helper reads the rotation buffer through `Quat4f`; viewer
+  convention must be selected empirically. Random-Gaussian training remains a
+  smoke test only and does not produce the SPZ comparison NPZ.
+- [x] Task 6.31C: User selected the SPZ candidate with scanner positions,
+  direct scales, position-axis rotation, and `xyzw` quaternion storage; the
+  color export was then generalized from DC-only to active training SH degree.
+  Make this the formal default for `make codex-scanner-points-train-spz` and
+  `make codex-spz-variants`: scale mode `direct`, rotation mode
+  `position_axis`, quaternion storage `xyzw`, and SPZ color export `sh`.
 - [ ] Inspect exported RGB and SH `.spz` files in the target viewer after longer
   scanner training runs.
 - [ ] Confirm coordinate, quaternion, opacity-logit, and SH coefficient

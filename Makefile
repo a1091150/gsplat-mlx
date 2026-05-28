@@ -32,6 +32,13 @@ SCANNER_TRAIN_N ?= 1024
 SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
 SCANNER_TRAIN_STEPS ?= 200
+SPZ_VARIANTS_OUT ?= outputs/spz_variants
+SPZ_VARIANTS_PREFIX ?= scanner_points
+SPZ_VARIANTS_POSITION_MODES ?= scanner
+SPZ_VARIANTS_SCALE_MODES ?= direct
+SPZ_VARIANTS_ROTATION_MODES ?= position_axis
+SPZ_VARIANTS_QUAT_ORDERS ?= xyzw
+SPZ_VARIANTS_COLOR_MODES ?= sh
 SCANNER_ALIGN_OUT ?= outputs/scanner_points_alignment
 SCANNER_ALIGN_WIDTH ?= 512
 SCANNER_ALIGN_HEIGHT ?= 512
@@ -46,15 +53,20 @@ SCANNER_SPZ_OPACITY ?= 0.65
 SCANNER_SPZ_COLOR_MODE ?= rgb
 SCANNER_POINTS_TRAIN_OUT ?= outputs/scanner_points_multiview_train
 SCANNER_POINTS_TRAIN_SPZ ?= outputs/scanner_points_multiview_train/trained_scanner_points.spz
+SCANNER_POINTS_TRAIN_MODEL_NPZ ?= outputs/scanner_points_multiview_train/trained_model_params.npz
+SCANNER_POINTS_TRAIN_SPZ_SCALE_MODE ?= direct
+SCANNER_POINTS_TRAIN_SPZ_ROTATION_MODE ?= position_axis
+SCANNER_POINTS_TRAIN_SPZ_QUAT_ORDER ?= xyzw
+SCANNER_POINTS_TRAIN_SPZ_COLOR_MODE ?= sh
 SCANNER_POINTS_TRAIN_WIDTH ?= 512
 SCANNER_POINTS_TRAIN_HEIGHT ?= 512
-SCANNER_POINTS_TRAIN_MAX_POINTS ?= 50000
-SCANNER_POINTS_TRAIN_FRAMES ?= 3
+SCANNER_POINTS_TRAIN_MAX_POINTS ?= 75000
+SCANNER_POINTS_TRAIN_FRAMES ?= 999
 SCANNER_POINTS_TRAIN_FRAME_STEP ?= 1
 SCANNER_POINTS_EVAL_FRAMES ?= 0
 SCANNER_POINTS_EVAL_FRAME_STEP ?= $(SCANNER_POINTS_TRAIN_FRAME_STEP)
 SCANNER_POINTS_EVAL_START_INDEX ?=
-SCANNER_POINTS_TRAIN_STEPS ?= 200
+SCANNER_POINTS_TRAIN_STEPS ?= 15000
 SCANNER_POINTS_TRAIN_BATCH_SIZE ?= 1
 SCANNER_POINTS_TRAIN_FRAME_SAMPLING ?= shuffle
 SCANNER_POINTS_TRAIN_FRAME_SHUFFLE_SEED ?= 7956
@@ -217,7 +229,7 @@ ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -233,6 +245,7 @@ help:
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
+	@printf "  make codex-spz-variants  Export SPZ convention variants from a saved model parameter NPZ.\n"
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
@@ -345,6 +358,17 @@ codex-scanner-random-train:
 		--frame-step $(SCANNER_TRAIN_FRAME_STEP) \
 		--steps $(SCANNER_TRAIN_STEPS)
 
+codex-spz-variants:
+	conda run -n $(CONDA_ENV) python scripts/test/export_spz_variants_from_model_npz.py \
+		--model-npz "$(SCANNER_POINTS_TRAIN_MODEL_NPZ)" \
+		--out-dir "$(SPZ_VARIANTS_OUT)" \
+		--prefix "$(SPZ_VARIANTS_PREFIX)" \
+		--position-modes "$(SPZ_VARIANTS_POSITION_MODES)" \
+		--scale-modes "$(SPZ_VARIANTS_SCALE_MODES)" \
+		--rotation-modes "$(SPZ_VARIANTS_ROTATION_MODES)" \
+		--quat-orders "$(SPZ_VARIANTS_QUAT_ORDERS)" \
+		--color-modes "$(SPZ_VARIANTS_COLOR_MODES)"
+
 codex-scanner-points-align:
 	conda run -n $(CONDA_ENV) python scripts/test/scanner_points_alignment_render.py \
 		--data "$(SCANNER_DATASET)" \
@@ -370,6 +394,11 @@ codex-scanner-points-train-spz:
 		--data "$(SCANNER_DATASET)" \
 		--out-dir "$(SCANNER_POINTS_TRAIN_OUT)" \
 		--out-spz "$(SCANNER_POINTS_TRAIN_SPZ)" \
+		--out-model-npz "$(SCANNER_POINTS_TRAIN_MODEL_NPZ)" \
+		--spz-scale-mode $(SCANNER_POINTS_TRAIN_SPZ_SCALE_MODE) \
+		--spz-rotation-mode $(SCANNER_POINTS_TRAIN_SPZ_ROTATION_MODE) \
+		--spz-quat-order $(SCANNER_POINTS_TRAIN_SPZ_QUAT_ORDER) \
+		--spz-color-mode $(SCANNER_POINTS_TRAIN_SPZ_COLOR_MODE) \
 		--width $(SCANNER_POINTS_TRAIN_WIDTH) \
 		--height $(SCANNER_POINTS_TRAIN_HEIGHT) \
 		--max-frames $(SCANNER_POINTS_TRAIN_FRAMES) \
