@@ -28,6 +28,7 @@ export_quat_scale_to_covar_preci_backward.py
 export_quat_scale_to_covar_preci_forward.py
 export_quat_scale_to_covar_preci_edge_cases.py
 export_forward_3dgs_chain.py
+export_training_reference_config.py
 ```
 
 The `.npz` keys use:
@@ -52,4 +53,22 @@ Pass one or more paths to compare a subset:
 ```bash
 conda run -n fastgs_core python scripts/test/compare_exported_npz.py \
   refs/forward_3dgs_chain.npz
+```
+
+Training reference planning:
+
+```bash
+python scripts/export_ref/export_training_reference_config.py \
+  --out refs/training_reference_config.json
+```
+
+This writes a fixed-seed JSON contract for longer CUDA gsplat training
+comparisons. After a CUDA-side trainer writes
+`refs/training_reference_summary_cuda.json`, compare it with the MLX scanner
+training summary using:
+
+```bash
+conda run -n fastgs_core python scripts/test/compare_training_summary.py \
+  --mlx outputs/scanner_points_multiview_train/training_summary.json \
+  --cuda refs/training_reference_summary_cuda.json
 ```

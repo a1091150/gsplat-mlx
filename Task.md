@@ -1368,8 +1368,11 @@
   performance tasks after dense training quality is stable.
 - [ ] Task 6.30I: Keep camera optimization, appearance embedding, exposure,
   background, and mask handling as later trainer-level tasks.
-- [ ] Task 6.30J: Expand CUDA gsplat parity from small `.npz` references to
+- [x] Task 6.30J: Expand CUDA gsplat parity from small `.npz` references to
   longer fixed-seed training comparisons once the trainer behavior stabilizes.
+  First pass adds the fixed config / summary comparison contract without
+  running Python tests: `scripts/export_ref/export_training_reference_config.py`
+  and `scripts/test/compare_training_summary.py`.
 
 ### Explicitly Deferred
 - SPZ/viewer validation and SPZ convention changes.
