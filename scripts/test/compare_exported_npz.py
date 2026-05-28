@@ -261,7 +261,7 @@ def compare_spherical_harmonics_backward(data: np.lib.npyio.NpzFile) -> list[boo
         compare_array("v_coeffs", ref(data, "v_coeffs"), mx_to_numpy(actual["v_coeffs"]), atol=1.0e-4, rtol=1.0e-4),
     ]
     if "ref__v_dirs" in data.files:
-        results.append(compare_array("v_dirs", ref(data, "v_dirs"), mx_to_numpy(actual["v_dirs"]), atol=1.0e-3, rtol=1.0e-3))
+        results.append(compare_array("v_dirs", ref(data, "v_dirs"), mx_to_numpy(actual["v_dirs"]), atol=1.0e-4, rtol=1.0e-4))
     return results
 
 
@@ -301,8 +301,8 @@ def compare_quat_scale_backward(data: np.lib.npyio.NpzFile) -> list[bool]:
     actual = quat_scale_to_covar_preci_backward(inputs, cotangents, triu=triu)
     mx.eval(*actual.values())
     return [
-        compare_array("v_quats", ref(data, "v_quats"), mx_to_numpy(actual["v_quats"]), atol=3.0e-3, rtol=3.0e-3),
-        compare_array("v_scales", ref(data, "v_scales"), mx_to_numpy(actual["v_scales"]), atol=3.0e-3, rtol=3.0e-3),
+        compare_array("v_quats", ref(data, "v_quats"), mx_to_numpy(actual["v_quats"]), atol=1.0e-4, rtol=1.0e-4),
+        compare_array("v_scales", ref(data, "v_scales"), mx_to_numpy(actual["v_scales"]), atol=1.0e-4, rtol=1.0e-4),
     ]
 
 
@@ -388,11 +388,17 @@ COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "rasterize_to_pixels_3dgs_backward.npz": compare_rasterize_backward,
     "rasterize_to_pixels_3dgs_forward.npz": compare_rasterize,
     "spherical_harmonics_backward.npz": compare_spherical_harmonics_backward,
+    "spherical_harmonics_backward_degree0_masks.npz": compare_spherical_harmonics_backward,
+    "spherical_harmonics_backward_degree1_masks.npz": compare_spherical_harmonics_backward,
+    "spherical_harmonics_backward_degree2_masks.npz": compare_spherical_harmonics_backward,
+    "spherical_harmonics_backward_degree3_masks.npz": compare_spherical_harmonics_backward,
+    "spherical_harmonics_backward_degree4_masks.npz": compare_spherical_harmonics_backward,
     "spherical_harmonics_forward.npz": compare_spherical_harmonics,
 }
 
 EXTRA_COMPARERS: dict[str, Callable[[np.lib.npyio.NpzFile], list[bool]]] = {
     "projection_ewa_3dgs_fused_edge_cases.npz": compare_projection,
+    "quat_scale_to_covar_preci_backward_edge_cases.npz": compare_quat_scale_backward,
     "quat_scale_to_covar_preci_edge_cases.npz": compare_quat_scale,
     "rasterize_to_pixels_3dgs_masks.npz": compare_rasterize,
     "spherical_harmonics_degree4_masks.npz": compare_spherical_harmonics,

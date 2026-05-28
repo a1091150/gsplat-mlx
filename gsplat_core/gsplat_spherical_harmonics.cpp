@@ -285,6 +285,145 @@ float sh_channel_to_color(int degree,
   return result;
 }
 
+void sh_direction_vjp(int degree,
+                      const float* dir,
+                      const float* coeffs,
+                      const float* v_colors,
+                      float* v_dir) {
+  v_dir[0] = 0.0f;
+  v_dir[1] = 0.0f;
+  v_dir[2] = 0.0f;
+  if (degree < 1) {
+    return;
+  }
+
+  const float norm =
+      std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+  if (norm == 0.0f) {
+    return;
+  }
+  const float inorm = 1.0f / norm;
+  const float x = dir[0] * inorm;
+  const float y = dir[1] * inorm;
+  const float z = dir[2] * inorm;
+
+  float dx[25] = {};
+  float dy[25] = {};
+  float dz[25] = {};
+
+  dx[3] = -kC1;
+  dy[1] = -kC1;
+  dz[2] = kC1;
+
+  const float z2 = z * z;
+  const float f_tmp0_b = -1.092548430592079f * z;
+  const float f_c1 = x * x - y * y;
+  const float f_s1 = 2.0f * x * y;
+  const float f_tmp0_b_z = -1.092548430592079f;
+  const float f_c1_x = 2.0f * x;
+  const float f_c1_y = -2.0f * y;
+  const float f_s1_x = 2.0f * y;
+  const float f_s1_y = 2.0f * x;
+  const float p_sh6_z = 2.0f * 0.9461746957575601f * z;
+  if (degree >= 2) {
+    dx[4] = 0.5462742152960395f * f_s1_x;
+    dy[4] = 0.5462742152960395f * f_s1_y;
+    dy[5] = f_tmp0_b;
+    dz[5] = f_tmp0_b_z * y;
+    dz[6] = p_sh6_z;
+    dx[7] = f_tmp0_b;
+    dz[7] = f_tmp0_b_z * x;
+    dx[8] = 0.5462742152960395f * f_c1_x;
+    dy[8] = 0.5462742152960395f * f_c1_y;
+  }
+
+  const float f_tmp0_c = -2.285228997322329f * z2 + 0.4570457994644658f;
+  const float f_tmp1_b = 1.445305721320277f * z;
+  const float f_c2 = x * f_c1 - y * f_s1;
+  const float f_s2 = x * f_s1 + y * f_c1;
+  const float p_sh12 =
+      z * (1.865881662950577f * z2 - 1.119528997770346f);
+  const float f_tmp0_c_z = -2.285228997322329f * 2.0f * z;
+  const float f_tmp1_b_z = 1.445305721320277f;
+  const float f_c2_x = f_c1 + x * f_c1_x - y * f_s1_x;
+  const float f_c2_y = x * f_c1_y - f_s1 - y * f_s1_y;
+  const float f_s2_x = f_s1 + x * f_s1_x + y * f_c1_x;
+  const float f_s2_y = x * f_s1_y + f_c1 + y * f_c1_y;
+  const float p_sh12_z =
+      3.0f * 1.865881662950577f * z2 - 1.119528997770346f;
+  if (degree >= 3) {
+    dx[9] = -0.5900435899266435f * f_s2_x;
+    dy[9] = -0.5900435899266435f * f_s2_y;
+    dx[10] = f_tmp1_b * f_s1_x;
+    dy[10] = f_tmp1_b * f_s1_y;
+    dz[10] = f_tmp1_b_z * f_s1;
+    dy[11] = f_tmp0_c;
+    dz[11] = f_tmp0_c_z * y;
+    dz[12] = p_sh12_z;
+    dx[13] = f_tmp0_c;
+    dz[13] = f_tmp0_c_z * x;
+    dx[14] = f_tmp1_b * f_c1_x;
+    dy[14] = f_tmp1_b * f_c1_y;
+    dz[14] = f_tmp1_b_z * f_c1;
+    dx[15] = -0.5900435899266435f * f_c2_x;
+    dy[15] = -0.5900435899266435f * f_c2_y;
+  }
+
+  if (degree >= 4) {
+    const float f_tmp0_d =
+        z * (-4.683325804901025f * z2 + 2.007139630671868f);
+    const float f_tmp1_c = 3.31161143515146f * z2 - 0.47308734787878f;
+    const float f_tmp2_b = -1.770130769779931f * z;
+    const float f_tmp0_d_z =
+        3.0f * -4.683325804901025f * z2 + 2.007139630671868f;
+    const float f_tmp1_c_z = 2.0f * 3.31161143515146f * z;
+    const float f_tmp2_b_z = -1.770130769779931f;
+    const float f_c3_x = f_c2 + x * f_c2_x - y * f_s2_x;
+    const float f_c3_y = x * f_c2_y - f_s2 - y * f_s2_y;
+    const float f_s3_x = f_s2 + y * f_c2_x + x * f_s2_x;
+    const float f_s3_y = x * f_s2_y + f_c2 + y * f_c2_y;
+    dx[16] = 0.6258357354491763f * f_s3_x;
+    dy[16] = 0.6258357354491763f * f_s3_y;
+    dx[17] = f_tmp2_b * f_s2_x;
+    dy[17] = f_tmp2_b * f_s2_y;
+    dz[17] = f_tmp2_b_z * f_s2;
+    dx[18] = f_tmp1_c * f_s1_x;
+    dy[18] = f_tmp1_c * f_s1_y;
+    dz[18] = f_tmp1_c_z * f_s1;
+    dy[19] = f_tmp0_d;
+    dz[19] = f_tmp0_d_z * y;
+    dz[20] = 1.984313483298443f * (p_sh12 + z * p_sh12_z) -
+             1.006230589874905f * p_sh6_z;
+    dx[21] = f_tmp0_d;
+    dz[21] = f_tmp0_d_z * x;
+    dx[22] = f_tmp1_c * f_c1_x;
+    dy[22] = f_tmp1_c * f_c1_y;
+    dz[22] = f_tmp1_c_z * f_c1;
+    dx[23] = f_tmp2_b * f_c2_x;
+    dy[23] = f_tmp2_b * f_c2_y;
+    dz[23] = f_tmp2_b_z * f_c2;
+    dx[24] = 0.6258357354491763f * f_c3_x;
+    dy[24] = 0.6258357354491763f * f_c3_y;
+  }
+
+  const int active_k = sh_basis_count(degree);
+  float v_dir_n[3] = {0.0f, 0.0f, 0.0f};
+  for (int b = 1; b < active_k; ++b) {
+    const float v_basis = coeffs[b * 3] * v_colors[0] +
+                          coeffs[b * 3 + 1] * v_colors[1] +
+                          coeffs[b * 3 + 2] * v_colors[2];
+    v_dir_n[0] += dx[b] * v_basis;
+    v_dir_n[1] += dy[b] * v_basis;
+    v_dir_n[2] += dz[b] * v_basis;
+  }
+
+  const float dot =
+      v_dir_n[0] * x + v_dir_n[1] * y + v_dir_n[2] * z;
+  v_dir[0] = (v_dir_n[0] - dot * x) * inorm;
+  v_dir[1] = (v_dir_n[1] - dot * y) * inorm;
+  v_dir[2] = (v_dir_n[2] - dot * z) * inorm;
+}
+
 }  // namespace
 
 mx::array gsplat_spherical_harmonics_forward(
@@ -385,9 +524,9 @@ void GSPlatSphericalHarmonicsBackward::eval_cpu(
   float* v_dirs_data =
       compute_v_dirs_ ? outputs[kSHVDirs].data<float>() : nullptr;
   float* v_coeffs_data = outputs[kSHVCoeffs].data<float>();
-  constexpr float eps = 1.0e-3f;
 
   float basis[25];
+  float v_dir[3];
   for (int elem = 0; elem < n; ++elem) {
     if (masks_data != nullptr && !masks_data[elem]) {
       continue;
@@ -407,25 +546,10 @@ void GSPlatSphericalHarmonicsBackward::eval_cpu(
     if (v_dirs_data == nullptr) {
       continue;
     }
-    for (int axis = 0; axis < 3; ++axis) {
-      float dir_plus[3] = {dir[0], dir[1], dir[2]};
-      float dir_minus[3] = {dir[0], dir[1], dir[2]};
-      dir_plus[axis] += eps;
-      dir_minus[axis] -= eps;
-      float grad = 0.0f;
-      for (int channel = 0; channel < 3; ++channel) {
-        const float plus =
-            sh_channel_to_color(degrees_to_use_, channel,
-                                dir_plus[0], dir_plus[1], dir_plus[2],
-                                elem_coeffs);
-        const float minus =
-            sh_channel_to_color(degrees_to_use_, channel,
-                                dir_minus[0], dir_minus[1], dir_minus[2],
-                                elem_coeffs);
-        grad += elem_v_colors[channel] * (plus - minus) / (2.0f * eps);
-      }
-      v_dirs_data[elem * 3 + axis] = grad;
-    }
+    sh_direction_vjp(degrees_to_use_, dir, elem_coeffs, elem_v_colors, v_dir);
+    v_dirs_data[elem * 3] = v_dir[0];
+    v_dirs_data[elem * 3 + 1] = v_dir[1];
+    v_dirs_data[elem * 3 + 2] = v_dir[2];
   }
 }
 

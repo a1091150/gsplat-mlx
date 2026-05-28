@@ -38,18 +38,18 @@
 - CUDA uses analytic `sh_coeffs_to_color_fast_vjp` in
   `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonicsCUDA.cu` around line
   488.
-- Metal currently computes `v_dirs` with centered finite differences using
+- Metal previously computed `v_dirs` with centered finite differences using
   `eps = 1e-3` in
   `gsplat_core/metal/gsplat_spherical_harmonics.metal` around line 244.
 - This can introduce small gradient differences during training, even though
   existing smoke and fixture tests cover the current approximation.
 
 ### Tasks
-- [ ] Port CUDA-style analytic SH direction VJP to Metal.
-- [ ] Keep `compute_v_dirs=false` behavior unchanged.
+- [x] Port CUDA-style analytic SH direction VJP to Metal.
+- [x] Keep `compute_v_dirs=false` behavior unchanged.
 - [ ] Add or update CUDA `.npz` fixtures for degree 0 through degree 4,
   including masks and `compute_v_dirs=true`.
-- [ ] Tighten comparer tolerances only after analytic parity is validated.
+- [x] Tighten comparer tolerances only after analytic parity is validated.
 
 ## Task M2 - Quat/Scale Covariance/Precision Analytic Backward
 
@@ -63,11 +63,11 @@
   CUDA-equivalent and may be slower or less stable in long training runs.
 
 ### Tasks
-- [ ] Port CUDA-style analytic `quat_scale_to_covar_vjp` to Metal.
-- [ ] Port CUDA-style analytic `quat_scale_to_preci_vjp` to Metal.
-- [ ] Preserve `triu=true` and `triu=false` cotangent layout semantics.
-- [ ] Preserve optional `v_covars` and `v_precis` behavior.
-- [ ] Add edge-case fixtures for non-unit quaternions, precision-only output,
+- [x] Port CUDA-style analytic `quat_scale_to_covar_vjp` to Metal.
+- [x] Port CUDA-style analytic `quat_scale_to_preci_vjp` to Metal.
+- [x] Preserve `triu=true` and `triu=false` cotangent layout semantics.
+- [x] Preserve optional `v_covars` and `v_precis` behavior.
+- [x] Add edge-case fixtures for non-unit quaternions, precision-only output,
   and full `3x3` cotangents.
 
 ## Task M3 - Projection Backward Non-Pinhole Coverage
@@ -113,4 +113,3 @@
   `flatten_ids`, and offsets for AccuTile.
 - [ ] Keep packed and segmented behavior out of scope for this task unless a
   separate requirement promotes them.
-

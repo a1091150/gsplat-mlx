@@ -126,6 +126,115 @@ inline float quat_scale_loss(float4 quat,
   return result;
 }
 
+inline Mat3 cotangent_matrix(bool triu, const device float* cot, uint idx) {
+  Mat3 out;
+  for (uint i = 0; i < 9; ++i) {
+    out.v[i] = 0.0f;
+  }
+  if (triu) {
+    uint base = idx * 6;
+    out.v[0] = cot[base];
+    out.v[1] = 0.5f * cot[base + 1];
+    out.v[2] = 0.5f * cot[base + 2];
+    out.v[3] = 0.5f * cot[base + 1];
+    out.v[4] = cot[base + 3];
+    out.v[5] = 0.5f * cot[base + 4];
+    out.v[6] = 0.5f * cot[base + 2];
+    out.v[7] = 0.5f * cot[base + 4];
+    out.v[8] = cot[base + 5];
+  } else {
+    uint base = idx * 9;
+    for (uint i = 0; i < 9; ++i) {
+      out.v[i] = cot[base + i];
+    }
+  }
+  return out;
+}
+
+inline void quat_to_rotmat_vjp(float4 quat, Mat3 v_r, thread float4& v_quat) {
+  float w = quat.x;
+  float x = quat.y;
+  float y = quat.z;
+  float z = quat.w;
+  float inv_norm = rsqrt(w * w + x * x + y * y + z * z);
+  w *= inv_norm;
+  x *= inv_norm;
+  y *= inv_norm;
+  z *= inv_norm;
+
+  float4 v_quat_n = float4(0.0f);
+  v_quat_n.y += 2.0f * y * v_r.v[1] + 2.0f * z * v_r.v[2] +
+                2.0f * y * v_r.v[3] - 4.0f * x * v_r.v[4] -
+                2.0f * w * v_r.v[5] + 2.0f * z * v_r.v[6] +
+                2.0f * w * v_r.v[7] - 4.0f * x * v_r.v[8];
+  v_quat_n.z += -4.0f * y * v_r.v[0] + 2.0f * x * v_r.v[1] +
+                2.0f * w * v_r.v[2] + 2.0f * x * v_r.v[3] +
+                2.0f * z * v_r.v[5] - 2.0f * w * v_r.v[6] +
+                2.0f * z * v_r.v[7] - 4.0f * y * v_r.v[8];
+  v_quat_n.w += -4.0f * z * v_r.v[0] - 2.0f * w * v_r.v[1] +
+                2.0f * x * v_r.v[2] + 2.0f * w * v_r.v[3] -
+                4.0f * z * v_r.v[4] + 2.0f * y * v_r.v[5] +
+                2.0f * x * v_r.v[6] + 2.0f * y * v_r.v[7];
+  v_quat_n.x += -2.0f * z * v_r.v[1] + 2.0f * y * v_r.v[2] +
+                2.0f * z * v_r.v[3] - 2.0f * x * v_r.v[5] -
+                2.0f * y * v_r.v[6] + 2.0f * x * v_r.v[7];
+
+  float4 quat_n = float4(w, x, y, z);
+  v_quat += (v_quat_n - dot(v_quat_n, quat_n) * quat_n) * inv_norm;
+}
+
+inline void quat_scale_vjp(float4 quat,
+                           float3 scale,
+                           Mat3 r,
+                           Mat3 v_matrix,
+                           bool precision,
+                           thread float4& v_quat,
+                           thread float3& v_scale) {
+  float3 s = scale;
+  if (precision) {
+    s = 1.0f / s;
+  }
+
+  Mat3 m;
+  Mat3 v_m;
+  Mat3 v_r;
+  for (uint i = 0; i < 9; ++i) {
+    m.v[i] = 0.0f;
+    v_m.v[i] = 0.0f;
+    v_r.v[i] = 0.0f;
+  }
+
+  for (uint row = 0; row < 3; ++row) {
+    for (uint col = 0; col < 3; ++col) {
+      m.v[row * 3 + col] = r.v[row * 3 + col] * s[col];
+    }
+  }
+  for (uint row = 0; row < 3; ++row) {
+    for (uint col = 0; col < 3; ++col) {
+      float value = 0.0f;
+      for (uint k = 0; k < 3; ++k) {
+        value += (v_matrix.v[row * 3 + k] + v_matrix.v[k * 3 + row]) *
+                 m.v[k * 3 + col];
+      }
+      v_m.v[row * 3 + col] = value;
+      v_r.v[row * 3 + col] = value * s[col];
+    }
+  }
+  quat_to_rotmat_vjp(quat, v_r, v_quat);
+
+  for (uint col = 0; col < 3; ++col) {
+    float grad = 0.0f;
+    for (uint row = 0; row < 3; ++row) {
+      grad += r.v[row * 3 + col] * v_m.v[row * 3 + col];
+    }
+    if (precision) {
+      v_scale[col] += -s[col] * s[col] * grad;
+    } else {
+      v_scale[col] += grad;
+    }
+  }
+}
+
 kernel void gsplat_quat_scale_to_covar_preci_forward_kernel(
     constant QuatScaleToCovarPreciKernelParams& params [[buffer(0)]],
     const device float* quats [[buffer(1)]],
@@ -187,31 +296,26 @@ kernel void gsplat_quat_scale_to_covar_preci_backward_kernel(
   bool triu = params.triu != 0;
   bool use_v_covars = params.compute_covar != 0;
   bool use_v_precis = params.compute_preci != 0;
-  constexpr float eps = 1.0e-3f;
 
-  for (uint axis = 0; axis < 4; ++axis) {
-    float4 plus_quat = quat;
-    float4 minus_quat = quat;
-    plus_quat[axis] += eps;
-    minus_quat[axis] -= eps;
-    v_quats[quat_base + axis] =
-        (quat_scale_loss(plus_quat, scale, triu, v_covars, v_precis,
-                         use_v_covars, use_v_precis, idx) -
-         quat_scale_loss(minus_quat, scale, triu, v_covars, v_precis,
-                         use_v_covars, use_v_precis, idx)) /
-        (2.0f * eps);
+  Mat3 r = quat_to_rotmat(quat);
+  float4 v_quat = float4(0.0f);
+  float3 v_scale = float3(0.0f);
+  if (use_v_covars) {
+    quat_scale_vjp(
+        quat, scale, r, cotangent_matrix(triu, v_covars, idx), false,
+        v_quat, v_scale);
+  }
+  if (use_v_precis) {
+    quat_scale_vjp(
+        quat, scale, r, cotangent_matrix(triu, v_precis, idx), true,
+        v_quat, v_scale);
   }
 
-  for (uint axis = 0; axis < 3; ++axis) {
-    float3 plus_scale = scale;
-    float3 minus_scale = scale;
-    plus_scale[axis] += eps;
-    minus_scale[axis] -= eps;
-    v_scales[scale_base + axis] =
-        (quat_scale_loss(quat, plus_scale, triu, v_covars, v_precis,
-                         use_v_covars, use_v_precis, idx) -
-         quat_scale_loss(quat, minus_scale, triu, v_covars, v_precis,
-                         use_v_covars, use_v_precis, idx)) /
-        (2.0f * eps);
-  }
+  v_quats[quat_base] = v_quat.x;
+  v_quats[quat_base + 1] = v_quat.y;
+  v_quats[quat_base + 2] = v_quat.z;
+  v_quats[quat_base + 3] = v_quat.w;
+  v_scales[scale_base] = v_scale.x;
+  v_scales[scale_base + 1] = v_scale.y;
+  v_scales[scale_base + 2] = v_scale.z;
 }

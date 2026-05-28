@@ -177,6 +177,136 @@ inline void sh_basis_values(uint degree, float3 dir, thread float* basis) {
   basis[24] = 0.6258357354491763f * f_c3;
 }
 
+inline float3 sh_direction_vjp(uint degree,
+                               float3 dir,
+                               const device float* coeffs,
+                               const device float* v_colors) {
+  if (degree < 1) {
+    return float3(0.0f);
+  }
+
+  float norm = length(dir);
+  if (norm == 0.0f) {
+    return float3(0.0f);
+  }
+  float inorm = 1.0f / norm;
+  float3 n_dir = dir * inorm;
+  float x = n_dir.x;
+  float y = n_dir.y;
+  float z = n_dir.z;
+
+  float dx[25];
+  float dy[25];
+  float dz[25];
+  for (uint i = 0; i < 25; ++i) {
+    dx[i] = 0.0f;
+    dy[i] = 0.0f;
+    dz[i] = 0.0f;
+  }
+
+  dx[3] = -C1;
+  dy[1] = -C1;
+  dz[2] = C1;
+
+  float z2 = z * z;
+  float f_tmp0_b = -1.092548430592079f * z;
+  float f_c1 = x * x - y * y;
+  float f_s1 = 2.0f * x * y;
+  float f_tmp0_b_z = -1.092548430592079f;
+  float f_c1_x = 2.0f * x;
+  float f_c1_y = -2.0f * y;
+  float f_s1_x = 2.0f * y;
+  float f_s1_y = 2.0f * x;
+  float p_sh6_z = 2.0f * 0.9461746957575601f * z;
+  if (degree >= 2) {
+    dx[4] = 0.5462742152960395f * f_s1_x;
+    dy[4] = 0.5462742152960395f * f_s1_y;
+    dy[5] = f_tmp0_b;
+    dz[5] = f_tmp0_b_z * y;
+    dz[6] = p_sh6_z;
+    dx[7] = f_tmp0_b;
+    dz[7] = f_tmp0_b_z * x;
+    dx[8] = 0.5462742152960395f * f_c1_x;
+    dy[8] = 0.5462742152960395f * f_c1_y;
+  }
+
+  float f_tmp0_c = -2.285228997322329f * z2 + 0.4570457994644658f;
+  float f_tmp1_b = 1.445305721320277f * z;
+  float f_c2 = x * f_c1 - y * f_s1;
+  float f_s2 = x * f_s1 + y * f_c1;
+  float p_sh12 = z * (1.865881662950577f * z2 - 1.119528997770346f);
+  float f_tmp0_c_z = -2.285228997322329f * 2.0f * z;
+  float f_tmp1_b_z = 1.445305721320277f;
+  float f_c2_x = f_c1 + x * f_c1_x - y * f_s1_x;
+  float f_c2_y = x * f_c1_y - f_s1 - y * f_s1_y;
+  float f_s2_x = f_s1 + x * f_s1_x + y * f_c1_x;
+  float f_s2_y = x * f_s1_y + f_c1 + y * f_c1_y;
+  float p_sh12_z = 3.0f * 1.865881662950577f * z2 - 1.119528997770346f;
+  if (degree >= 3) {
+    dx[9] = -0.5900435899266435f * f_s2_x;
+    dy[9] = -0.5900435899266435f * f_s2_y;
+    dx[10] = f_tmp1_b * f_s1_x;
+    dy[10] = f_tmp1_b * f_s1_y;
+    dz[10] = f_tmp1_b_z * f_s1;
+    dy[11] = f_tmp0_c;
+    dz[11] = f_tmp0_c_z * y;
+    dz[12] = p_sh12_z;
+    dx[13] = f_tmp0_c;
+    dz[13] = f_tmp0_c_z * x;
+    dx[14] = f_tmp1_b * f_c1_x;
+    dy[14] = f_tmp1_b * f_c1_y;
+    dz[14] = f_tmp1_b_z * f_c1;
+    dx[15] = -0.5900435899266435f * f_c2_x;
+    dy[15] = -0.5900435899266435f * f_c2_y;
+  }
+
+  if (degree >= 4) {
+    float f_tmp0_d = z * (-4.683325804901025f * z2 + 2.007139630671868f);
+    float f_tmp1_c = 3.31161143515146f * z2 - 0.47308734787878f;
+    float f_tmp2_b = -1.770130769779931f * z;
+    float f_tmp0_d_z = 3.0f * -4.683325804901025f * z2 + 2.007139630671868f;
+    float f_tmp1_c_z = 2.0f * 3.31161143515146f * z;
+    float f_tmp2_b_z = -1.770130769779931f;
+    float f_c3_x = f_c2 + x * f_c2_x - y * f_s2_x;
+    float f_c3_y = x * f_c2_y - f_s2 - y * f_s2_y;
+    float f_s3_x = f_s2 + y * f_c2_x + x * f_s2_x;
+    float f_s3_y = x * f_s2_y + f_c2 + y * f_c2_y;
+    dz[16] = 0.0f;
+    dx[16] = 0.6258357354491763f * f_s3_x;
+    dy[16] = 0.6258357354491763f * f_s3_y;
+    dx[17] = f_tmp2_b * f_s2_x;
+    dy[17] = f_tmp2_b * f_s2_y;
+    dz[17] = f_tmp2_b_z * f_s2;
+    dx[18] = f_tmp1_c * f_s1_x;
+    dy[18] = f_tmp1_c * f_s1_y;
+    dz[18] = f_tmp1_c_z * f_s1;
+    dy[19] = f_tmp0_d;
+    dz[19] = f_tmp0_d_z * y;
+    dz[20] = 1.984313483298443f * (p_sh12 + z * p_sh12_z) -
+             1.006230589874905f * p_sh6_z;
+    dx[21] = f_tmp0_d;
+    dz[21] = f_tmp0_d_z * x;
+    dx[22] = f_tmp1_c * f_c1_x;
+    dy[22] = f_tmp1_c * f_c1_y;
+    dz[22] = f_tmp1_c_z * f_c1;
+    dx[23] = f_tmp2_b * f_c2_x;
+    dy[23] = f_tmp2_b * f_c2_y;
+    dz[23] = f_tmp2_b_z * f_c2;
+    dx[24] = 0.6258357354491763f * f_c3_x;
+    dy[24] = 0.6258357354491763f * f_c3_y;
+  }
+
+  uint active_k = (degree + 1) * (degree + 1);
+  float3 v_dir_n = float3(0.0f);
+  for (uint b = 1; b < active_k; ++b) {
+    float v_basis = coeffs[b * 3] * v_colors[0] +
+                    coeffs[b * 3 + 1] * v_colors[1] +
+                    coeffs[b * 3 + 2] * v_colors[2];
+    v_dir_n += float3(dx[b], dy[b], dz[b]) * v_basis;
+  }
+  return (v_dir_n - dot(v_dir_n, n_dir) * n_dir) * inorm;
+}
+
 kernel void gsplat_spherical_harmonics_forward_kernel(
     constant SphericalHarmonicsKernelParams& params [[buffer(0)]],
     const device float* dirs [[buffer(1)]],
@@ -241,20 +371,9 @@ kernel void gsplat_spherical_harmonics_backward_kernel(
     return;
   }
 
-  constexpr float eps = 1.0e-3f;
-  for (uint axis = 0; axis < 3; ++axis) {
-    float3 dir_plus = dir;
-    float3 dir_minus = dir;
-    dir_plus[axis] += eps;
-    dir_minus[axis] -= eps;
-    float grad = 0.0f;
-    for (uint channel = 0; channel < 3; ++channel) {
-      float plus = sh_channel_to_color(
-          params.degrees_to_use, channel, dir_plus, elem_coeffs);
-      float minus = sh_channel_to_color(
-          params.degrees_to_use, channel, dir_minus, elem_coeffs);
-      grad += elem_v_colors[channel] * (plus - minus) / (2.0f * eps);
-    }
-    v_dirs[idx * 3 + axis] = grad;
-  }
+  float3 v_dir =
+      sh_direction_vjp(params.degrees_to_use, dir, elem_coeffs, elem_v_colors);
+  v_dirs[idx * 3] = v_dir.x;
+  v_dirs[idx * 3 + 1] = v_dir.y;
+  v_dirs[idx * 3 + 2] = v_dir.z;
 }

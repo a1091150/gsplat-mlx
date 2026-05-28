@@ -39,7 +39,6 @@ def main() -> None:
     try:
         v_coeffs, v_dirs = spherical_harmonics_bwd(
             degrees_to_use,
-            coeffs.shape[-2],
             dirs,
             coeffs,
             masks,
@@ -49,6 +48,7 @@ def main() -> None:
     except TypeError:
         v_coeffs, v_dirs = spherical_harmonics_bwd(
             degrees_to_use,
+            coeffs.shape[-2],
             dirs,
             coeffs,
             masks,
