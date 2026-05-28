@@ -38,18 +38,18 @@
 - CUDA uses analytic `sh_coeffs_to_color_fast_vjp` in
   `submodules/gsplat/gsplat/cuda/csrc/SphericalHarmonicsCUDA.cu` around line
   488.
-- Metal currently computes `v_dirs` with centered finite differences using
+- Metal previously computed `v_dirs` with centered finite differences using
   `eps = 1e-3` in
   `gsplat_core/metal/gsplat_spherical_harmonics.metal` around line 244.
 - This can introduce small gradient differences during training, even though
   existing smoke and fixture tests cover the current approximation.
 
 ### Tasks
-- [ ] Port CUDA-style analytic SH direction VJP to Metal.
-- [ ] Keep `compute_v_dirs=false` behavior unchanged.
+- [x] Port CUDA-style analytic SH direction VJP to Metal.
+- [x] Keep `compute_v_dirs=false` behavior unchanged.
 - [ ] Add or update CUDA `.npz` fixtures for degree 0 through degree 4,
   including masks and `compute_v_dirs=true`.
-- [ ] Tighten comparer tolerances only after analytic parity is validated.
+- [x] Tighten comparer tolerances only after analytic parity is validated.
 
 ## Task M2 - Quat/Scale Covariance/Precision Analytic Backward
 
@@ -113,4 +113,3 @@
   `flatten_ids`, and offsets for AccuTile.
 - [ ] Keep packed and segmented behavior out of scope for this task unless a
   separate requirement promotes them.
-
