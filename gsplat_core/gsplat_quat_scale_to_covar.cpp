@@ -212,6 +212,126 @@ float quat_scale_loss(const float* quat,
   return result;
 }
 
+Mat3 cotangent_matrix(bool triu, const float* cot) {
+  Mat3 out = {};
+  if (cot == nullptr) {
+    return out;
+  }
+  if (triu) {
+    out.v[0] = cot[0];
+    out.v[1] = 0.5f * cot[1];
+    out.v[2] = 0.5f * cot[2];
+    out.v[3] = 0.5f * cot[1];
+    out.v[4] = cot[3];
+    out.v[5] = 0.5f * cot[4];
+    out.v[6] = 0.5f * cot[2];
+    out.v[7] = 0.5f * cot[4];
+    out.v[8] = cot[5];
+  } else {
+    for (int i = 0; i < 9; ++i) {
+      out.v[i] = cot[i];
+    }
+  }
+  return out;
+}
+
+void quat_to_rotmat_vjp(const float* quat, const Mat3& v_r, float* v_quat) {
+  float w = quat[0];
+  float x = quat[1];
+  float y = quat[2];
+  float z = quat[3];
+  const float norm = std::sqrt(w * w + x * x + y * y + z * z);
+  if (norm == 0.0f) {
+    throw std::runtime_error("quaternion norm must be non-zero.");
+  }
+  const float inv_norm = 1.0f / norm;
+  w *= inv_norm;
+  x *= inv_norm;
+  y *= inv_norm;
+  z *= inv_norm;
+
+  float v_quat_n[4] = {};
+  v_quat_n[1] += 2.0f * y * v_r.v[1] + 2.0f * z * v_r.v[2] +
+                 2.0f * y * v_r.v[3] - 4.0f * x * v_r.v[4] -
+                 2.0f * w * v_r.v[5] + 2.0f * z * v_r.v[6] +
+                 2.0f * w * v_r.v[7] - 4.0f * x * v_r.v[8];
+  v_quat_n[2] += -4.0f * y * v_r.v[0] + 2.0f * x * v_r.v[1] +
+                 2.0f * w * v_r.v[2] + 2.0f * x * v_r.v[3] +
+                 2.0f * z * v_r.v[5] - 2.0f * w * v_r.v[6] +
+                 2.0f * z * v_r.v[7] - 4.0f * y * v_r.v[8];
+  v_quat_n[3] += -4.0f * z * v_r.v[0] - 2.0f * w * v_r.v[1] +
+                 2.0f * x * v_r.v[2] + 2.0f * w * v_r.v[3] -
+                 4.0f * z * v_r.v[4] + 2.0f * y * v_r.v[5] +
+                 2.0f * x * v_r.v[6] + 2.0f * y * v_r.v[7];
+  v_quat_n[0] += -2.0f * z * v_r.v[1] + 2.0f * y * v_r.v[2] +
+                 2.0f * z * v_r.v[3] - 2.0f * x * v_r.v[5] -
+                 2.0f * y * v_r.v[6] + 2.0f * x * v_r.v[7];
+
+  const float dot = v_quat_n[0] * w + v_quat_n[1] * x +
+                    v_quat_n[2] * y + v_quat_n[3] * z;
+  v_quat[0] += (v_quat_n[0] - dot * w) * inv_norm;
+  v_quat[1] += (v_quat_n[1] - dot * x) * inv_norm;
+  v_quat[2] += (v_quat_n[2] - dot * y) * inv_norm;
+  v_quat[3] += (v_quat_n[3] - dot * z) * inv_norm;
+}
+
+void quat_scale_vjp(const float* quat,
+                    const float* scale,
+                    const Mat3& r,
+                    const Mat3& v_matrix,
+                    bool precision,
+                    float* v_quat,
+                    float* v_scale) {
+  float s[3] = {scale[0], scale[1], scale[2]};
+  if (precision) {
+    if (s[0] == 0.0f || s[1] == 0.0f || s[2] == 0.0f) {
+      throw std::runtime_error("precision path expects non-zero scales.");
+    }
+    s[0] = 1.0f / s[0];
+    s[1] = 1.0f / s[1];
+    s[2] = 1.0f / s[2];
+  }
+
+  Mat3 m = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      m.v[row * 3 + col] = r.v[row * 3 + col] * s[col];
+    }
+  }
+
+  Mat3 v_m = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      float value = 0.0f;
+      for (int k = 0; k < 3; ++k) {
+        value += (v_matrix.v[row * 3 + k] + v_matrix.v[k * 3 + row]) *
+                 m.v[k * 3 + col];
+      }
+      v_m.v[row * 3 + col] = value;
+    }
+  }
+
+  Mat3 v_r = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      v_r.v[row * 3 + col] = v_m.v[row * 3 + col] * s[col];
+    }
+  }
+  quat_to_rotmat_vjp(quat, v_r, v_quat);
+
+  for (int col = 0; col < 3; ++col) {
+    float grad = 0.0f;
+    for (int row = 0; row < 3; ++row) {
+      grad += r.v[row * 3 + col] * v_m.v[row * 3 + col];
+    }
+    if (precision) {
+      v_scale[col] += -s[col] * s[col] * grad;
+    } else {
+      v_scale[col] += grad;
+    }
+  }
+}
+
 }  // namespace
 
 std::vector<mx::array> gsplat_quat_scale_to_covar_preci_forward(
@@ -308,7 +428,6 @@ void GSPlatQuatScaleToCovarPreciBackward::eval_cpu(
       use_v_precis_ ? v_precis.data<float>() : nullptr;
   float* v_quats_data = outputs[kVQuats].data<float>();
   float* v_scales_data = outputs[kVScales].data<float>();
-  constexpr float eps = 1.0e-3f;
 
   for (int elem = 0; elem < n; ++elem) {
     const float* quat = quats_data + elem * 4;
@@ -318,25 +437,32 @@ void GSPlatQuatScaleToCovarPreciBackward::eval_cpu(
     const float* v_preci =
         v_precis_data == nullptr ? nullptr : v_precis_data + elem * out_stride;
 
+    float v_quat[4] = {};
+    float v_scale[3] = {};
+    const Mat3 r = quat_to_rotmat(quat);
+    if (v_covar != nullptr) {
+      quat_scale_vjp(quat,
+                     scale,
+                     r,
+                     cotangent_matrix(triu_, v_covar),
+                     false,
+                     v_quat,
+                     v_scale);
+    }
+    if (v_preci != nullptr) {
+      quat_scale_vjp(quat,
+                     scale,
+                     r,
+                     cotangent_matrix(triu_, v_preci),
+                     true,
+                     v_quat,
+                     v_scale);
+    }
     for (int axis = 0; axis < 4; ++axis) {
-      float plus_quat[4] = {quat[0], quat[1], quat[2], quat[3]};
-      float minus_quat[4] = {quat[0], quat[1], quat[2], quat[3]};
-      plus_quat[axis] += eps;
-      minus_quat[axis] -= eps;
-      v_quats_data[elem * 4 + axis] =
-          (quat_scale_loss(plus_quat, scale, triu_, v_covar, v_preci) -
-           quat_scale_loss(minus_quat, scale, triu_, v_covar, v_preci)) /
-          (2.0f * eps);
+      v_quats_data[elem * 4 + axis] = v_quat[axis];
     }
     for (int axis = 0; axis < 3; ++axis) {
-      float plus_scale[3] = {scale[0], scale[1], scale[2]};
-      float minus_scale[3] = {scale[0], scale[1], scale[2]};
-      plus_scale[axis] += eps;
-      minus_scale[axis] -= eps;
-      v_scales_data[elem * 3 + axis] =
-          (quat_scale_loss(quat, plus_scale, triu_, v_covar, v_preci) -
-           quat_scale_loss(quat, minus_scale, triu_, v_covar, v_preci)) /
-          (2.0f * eps);
+      v_scales_data[elem * 3 + axis] = v_scale[axis];
     }
   }
 }

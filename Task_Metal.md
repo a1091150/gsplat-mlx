@@ -63,11 +63,11 @@
   CUDA-equivalent and may be slower or less stable in long training runs.
 
 ### Tasks
-- [ ] Port CUDA-style analytic `quat_scale_to_covar_vjp` to Metal.
-- [ ] Port CUDA-style analytic `quat_scale_to_preci_vjp` to Metal.
-- [ ] Preserve `triu=true` and `triu=false` cotangent layout semantics.
-- [ ] Preserve optional `v_covars` and `v_precis` behavior.
-- [ ] Add edge-case fixtures for non-unit quaternions, precision-only output,
+- [x] Port CUDA-style analytic `quat_scale_to_covar_vjp` to Metal.
+- [x] Port CUDA-style analytic `quat_scale_to_preci_vjp` to Metal.
+- [x] Preserve `triu=true` and `triu=false` cotangent layout semantics.
+- [x] Preserve optional `v_covars` and `v_precis` behavior.
+- [x] Add edge-case fixtures for non-unit quaternions, precision-only output,
   and full `3x3` cotangents.
 
 ## Task M3 - Projection Backward Non-Pinhole Coverage
