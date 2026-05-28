@@ -44,6 +44,61 @@ GAUSSIAN_AXES = {
 }
 
 
+class FrameBatchSampler:
+    def __init__(self, frame_count: int, batch_size: int, mode: str, seed: int):
+        if frame_count <= 0:
+            raise ValueError("frame_count must be positive")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if mode not in ("sequential", "shuffle"):
+            raise ValueError(f"Unsupported frame sampling mode: {mode}")
+        self.frame_count = int(frame_count)
+        self.batch_size = int(batch_size)
+        self.mode = mode
+        self.rng = np.random.default_rng(seed)
+        self.order = np.arange(self.frame_count, dtype=np.int32)
+        self.position = 0
+        self.epoch = 0
+        self.usage_counts = np.zeros((self.frame_count,), dtype=np.int64)
+        self.history: list[list[int]] = []
+        if self.mode == "shuffle":
+            self.rng.shuffle(self.order)
+
+    def next_batch(self) -> list[int]:
+        batch = []
+        while len(batch) < self.batch_size:
+            if self.position >= self.frame_count:
+                self.epoch += 1
+                self.position = 0
+                self.order = np.arange(self.frame_count, dtype=np.int32)
+                if self.mode == "shuffle":
+                    self.rng.shuffle(self.order)
+            take = min(self.batch_size - len(batch), self.frame_count - self.position)
+            batch.extend(self.order[self.position : self.position + take].astype(int).tolist())
+            self.position += take
+        for idx in batch:
+            self.usage_counts[idx] += 1
+        if len(self.history) < 16:
+            self.history.append([int(idx) for idx in batch])
+        return batch
+
+    def summary(self, cameras) -> dict:
+        return {
+            "mode": self.mode,
+            "batch_size": self.batch_size,
+            "frame_count": self.frame_count,
+            "completed_epochs": int(self.epoch),
+            "usage_counts": self.usage_counts.astype(int).tolist(),
+            "usage_count_min": int(self.usage_counts.min()) if self.usage_counts.size else 0,
+            "usage_count_max": int(self.usage_counts.max()) if self.usage_counts.size else 0,
+            "sampled_batches": self.history,
+            "sampled_frame_indices": [
+                [int(cameras[idx].index) for idx in batch]
+                for batch in self.history
+            ],
+        }
+
+
 class ScannerPointsSHModel(nn.Module):
     def __init__(
         self,
@@ -767,6 +822,19 @@ def sh_colors_for_camera(
     return mx.clip(mx.reshape(colors + 0.5, (*dirs.shape[:-1], 3)), 0.0, 1.0)
 
 
+def camera_batch_arrays(cameras, batch_ids: list[int]) -> tuple[mx.array, mx.array]:
+    viewmats = np.stack([cameras[idx].viewmat for idx in batch_ids], axis=0)
+    Ks = np.stack([cameras[idx].K for idx in batch_ids], axis=0)
+    return (
+        mx.array(viewmats[None, ...], dtype=mx.float32),
+        mx.array(Ks[None, ...], dtype=mx.float32),
+    )
+
+
+def target_batch_array(targets: list[mx.array], batch_ids: list[int]) -> mx.array:
+    return mx.concatenate([targets[idx] for idx in batch_ids], axis=0)
+
+
 def render_sh_model(
     model: ScannerPointsSHModel,
     viewspace_points: mx.array,
@@ -1349,6 +1417,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opacity", type=float, default=0.65)
     parser.add_argument("--seed", type=int, default=37)
     parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--frame-sampling", choices=("sequential", "shuffle"), default="shuffle")
+    parser.add_argument("--frame-shuffle-seed", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--loss-mode", choices=("l1", "l1_dssim"), default="l1_dssim")
     parser.add_argument("--ssim-lambda", type=float, default=0.2)
     parser.add_argument("--ssim-window-size", type=int, default=11)
@@ -1436,6 +1507,8 @@ def main() -> None:
         raise ValueError("--random-gaussian-bounds-scale must be positive")
     if args.eval_max_frames < 0:
         raise ValueError("--eval-max-frames must be nonnegative")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
     eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
     if eval_frame_step <= 0:
         raise ValueError("--eval-frame-step must be positive")
@@ -1574,6 +1647,12 @@ def main() -> None:
     ) if eval_cameras else []
     initial_mean_loss = mean_loss(initial_stats)
     active_sh_degree = initial_active_sh_degree
+    sampler = FrameBatchSampler(
+        frame_count=len(cameras),
+        batch_size=args.batch_size,
+        mode=args.frame_sampling,
+        seed=args.seed + 7919 if args.frame_shuffle_seed is None else args.frame_shuffle_seed,
+    )
     sh_degree_events = (
         [{"step": 1, "active_sh_degree": int(initial_active_sh_degree)}]
         if args.color_mode == "sh"
@@ -1592,15 +1671,30 @@ def main() -> None:
         target: mx.array,
     ) -> mx.array:
         local = Tiny3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
-        render = render_model(local, viewspace_points, viewmats, Ks, args.width, args.height, args.tile_size)
-        loss = image_training_loss(
-            render["render_colors"],
-            target,
-            args.loss_mode,
-            args.ssim_lambda,
-            args.ssim_window_size,
-        )
-        return loss, render["radii"]
+        losses = []
+        radii = []
+        batch = int(viewmats.shape[1])
+        for idx in range(batch):
+            render = render_model(
+                local,
+                viewspace_points[:, idx : idx + 1],
+                viewmats[:, idx : idx + 1],
+                Ks[:, idx : idx + 1],
+                args.width,
+                args.height,
+                args.tile_size,
+            )
+            losses.append(
+                image_training_loss(
+                    render["render_colors"],
+                    target[idx : idx + 1],
+                    args.loss_mode,
+                    args.ssim_lambda,
+                    args.ssim_window_size,
+                )
+            )
+            radii.append(render["radii"])
+        return mx.mean(mx.stack(losses)), mx.concatenate(radii, axis=1)
 
     def sh_loss_fn(
         means: mx.array,
@@ -1622,24 +1716,31 @@ def main() -> None:
             features_rest,
             opacity_logits,
         )
-        render = render_sh_model(
-            local,
-            viewspace_points,
-            viewmats,
-            Ks,
-            args.width,
-            args.height,
-            args.tile_size,
-            active_sh_degree,
-        )
-        loss = image_training_loss(
-            render["render_colors"],
-            target,
-            args.loss_mode,
-            args.ssim_lambda,
-            args.ssim_window_size,
-        )
-        return loss, render["radii"]
+        losses = []
+        radii = []
+        batch = int(viewmats.shape[1])
+        for idx in range(batch):
+            render = render_sh_model(
+                local,
+                viewspace_points[:, idx : idx + 1],
+                viewmats[:, idx : idx + 1],
+                Ks[:, idx : idx + 1],
+                args.width,
+                args.height,
+                args.tile_size,
+                active_sh_degree,
+            )
+            losses.append(
+                image_training_loss(
+                    render["render_colors"],
+                    target[idx : idx + 1],
+                    args.loss_mode,
+                    args.ssim_lambda,
+                    args.ssim_window_size,
+                )
+            )
+            radii.append(render["radii"])
+        return mx.mean(mx.stack(losses)), mx.concatenate(radii, axis=1)
 
     rgb_grad_fn = mx.value_and_grad(rgb_loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     sh_grad_fn = mx.value_and_grad(sh_loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
@@ -1714,11 +1815,11 @@ def main() -> None:
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             for name, schedule in lr_schedules.items():
                 schedule["history"].append({"step": int(step), "lr": float(schedule["latest"])})
-        view_id = (step - 1) % len(cameras)
-        camera = cameras[view_id]
-        target = targets[view_id]
-        viewmats, Ks = camera_arrays(camera)
-        viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
+        batch_ids = sampler.next_batch()
+        batch_frame_indices = [int(cameras[idx].index) for idx in batch_ids]
+        target = target_batch_array(targets, batch_ids)
+        viewmats, Ks = camera_batch_arrays(cameras, batch_ids)
+        viewspace_points = mx.zeros((1, len(batch_ids), model.means.shape[1], 2), dtype=mx.float32)
         if args.color_mode == "rgb":
             (loss, strategy_radii), grads = rgb_grad_fn(
                 model.means,
@@ -1795,13 +1896,13 @@ def main() -> None:
                 strategy_radii,
                 width=args.width,
                 height=args.height,
-                n_cameras=1,
+                n_cameras=len(batch_ids),
             )
         strategy.after_optimizer_step(step, model, optimizers, args.color_mode)
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             print(
-                f"step={step:04d} frame={camera.index:05d} "
+                f"step={step:04d} frames={batch_frame_indices} "
                 f"loss={last_loss:.8f} means_lr={latest_lrs['means']:.8g} "
                 f"opacity_lr={latest_lrs['opacity_logits']:.8g} "
                 f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
@@ -1944,6 +2045,7 @@ def main() -> None:
         "eval_start_index": eval_start_index if eval_cameras else None,
         "eval_frame_step": eval_frame_step if eval_cameras else None,
         "steps": args.steps,
+        "dataloader": sampler.summary(cameras),
         "loss_function": args.loss_mode,
         "loss_config": {
             "mode": args.loss_mode,

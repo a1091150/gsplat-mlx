@@ -1289,7 +1289,7 @@
 - [ ] Add optional background/mask handling if scanner frames require it.
 - [ ] Keep camera optimization and appearance embeddings out of scope until the
   low-level gsplat_core path is stable.
-- [ ] Improve dataloader/batching beyond the current simple round-robin
+- [x] Improve dataloader/batching beyond the current simple round-robin
   single-frame loop: shuffle frames, support camera/image mini-batches, and
   preserve explicit train/eval splits.
 - [ ] Improve initialization beyond `points.ply` plus fixed scale/opacity:
@@ -1355,8 +1355,9 @@
   `refine_scale2d_stop_iter > 0`, `revised_opacity`, scale pruning, and opacity
   reset timing.
   Debug: `scripts/test/refine_strategy_branches_debug.py`.
-- [ ] Task 6.30F: Improve scanner dataloader behavior with frame shuffling,
+- [x] Task 6.30F: Improve scanner dataloader behavior with frame shuffling,
   mini-batch camera/image support, and explicit train/eval split controls.
+  Debug: `scripts/test/scanner_dataloader_debug.py`.
 - [ ] Task 6.30G: Improve scene initialization with scene scale estimation,
   normalization, and point-neighborhood scale initialization.
 - [ ] Task 6.30H: Keep packed paths, sparse gradients, and visible Adam as later
