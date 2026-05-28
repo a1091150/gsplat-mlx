@@ -1259,8 +1259,10 @@
   and optional `radii` stats so stale gradients do not drive later topology
   changes.
 - [ ] Validate clone/split/prune/reset thresholds on long scanner training runs.
-- [ ] Implement real `absgrad` behavior instead of only preserving the CLI/config
-  option.
+- [x] Add strategy support for real `absgrad` accumulation when a
+  rasterize-style `v_means2d_abs` / `viewspace_points` absolute-gradient array
+  is provided; record fallback diagnostics when training only has signed
+  `viewspace_points` gradients.
 - [ ] Add a dedicated smoke for `refine_scale2d_stop_iter > 0` so 2D radius
   split/prune is exercised.
 - [ ] Validate `revised_opacity` split on longer training runs and decide whether
@@ -1335,8 +1337,11 @@
   gsplat-style defaults as the baseline while keeping CLI/Makefile overrides.
 - [x] Task 6.30C: Add optional L1 + SSIM/DSSIM image loss, with L1-only kept as
   a selectable smoke-test mode.
-- [ ] Task 6.30D: Implement real `absgrad` accumulation for
+- [x] Task 6.30D: Implement real `absgrad` accumulation for
   `viewspace_points`, matching gsplat's absolute-gradient strategy option.
+  Current code supports a provided absolute-gradient array and reports
+  `absgrad_requested_signed_grad_fallback` until the full training loop wires
+  rasterize backward `v_means2d_abs` into `update_state(...)`.
 - [ ] Task 6.30E: Add focused refine validation for
   `refine_scale2d_stop_iter > 0`, `revised_opacity`, scale pruning, and opacity
   reset timing.

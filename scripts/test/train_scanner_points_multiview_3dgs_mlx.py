@@ -153,6 +153,8 @@ class ScannerDefaultStrategyRuntime:
             "n_opacity_reset": 0,
         }
         self.last_grad2d_stats = self._grad2d_stats()
+        self.last_grad2d_mode = "signed_grad_norm"
+        self.absgrad_fallback_count = 0
         self.rng = np.random.default_rng(20280628)
 
     def _ensure_size(self, gaussian_count: int) -> None:
@@ -189,11 +191,22 @@ class ScannerDefaultStrategyRuntime:
         width: int,
         height: int,
         n_cameras: int,
+        d_viewspace_abs: mx.array | None = None,
     ) -> None:
         if not self.config.enabled:
             return
-        mx.eval(d_viewspace, radii)
-        grads = np.asarray(d_viewspace, dtype=np.float32)
+        if self.config.absgrad and d_viewspace_abs is not None:
+            mx.eval(d_viewspace_abs, radii)
+            grads = np.asarray(d_viewspace_abs, dtype=np.float32)
+            self.last_grad2d_mode = "absgrad_norm"
+        else:
+            mx.eval(d_viewspace, radii)
+            grads = np.asarray(d_viewspace, dtype=np.float32)
+            if self.config.absgrad:
+                self.absgrad_fallback_count += 1
+                self.last_grad2d_mode = "absgrad_requested_signed_grad_fallback"
+            else:
+                self.last_grad2d_mode = "signed_grad_norm"
         radii_np = np.asarray(radii, dtype=np.float32)
         self._ensure_size(grads.shape[-2])
 
@@ -594,6 +607,8 @@ class ScannerDefaultStrategyRuntime:
                 "grad2d_stats_before_reset": grad2d_stats_before_reset,
                 "grad2d_stats_after_reset": self.last_grad2d_stats,
                 "grad2d_stats": self.last_grad2d_stats,
+                "grad2d_mode": self.last_grad2d_mode,
+                "absgrad_fallback_count": self.absgrad_fallback_count,
                 "status": "clone_split_scale_prune_reset_task_6_30a",
             }
         )
@@ -631,6 +646,8 @@ class ScannerDefaultStrategyRuntime:
                 "opacity_reset": self.totals["n_opacity_reset"],
             },
             "grad2d_accumulation": "dense_viewspace_points_gradient",
+            "grad2d_mode": self.last_grad2d_mode,
+            "absgrad_fallback_count": self.absgrad_fallback_count,
             "grad2d_stats": self.last_grad2d_stats,
             "preview_diagnostics": {
                 "visible_gaussians": self.last_grad2d_stats["visible_gaussians"],
@@ -638,6 +655,8 @@ class ScannerDefaultStrategyRuntime:
                 "grad2d_mean": self.last_grad2d_stats["grad2d_mean"],
                 "grad2d_max": self.last_grad2d_stats["grad2d_max"],
                 "radii_max": self.last_grad2d_stats["radii_max"],
+                "grad2d_mode": self.last_grad2d_mode,
+                "absgrad_fallback_count": self.absgrad_fallback_count,
             },
             "opacity_reset_target": self.opacity_reset_target(),
             "opacity_reset_target_logit": self.opacity_reset_target_logit(),
