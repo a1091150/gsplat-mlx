@@ -1292,9 +1292,10 @@
 - [x] Improve dataloader/batching beyond the current simple round-robin
   single-frame loop: shuffle frames, support camera/image mini-batches, and
   preserve explicit train/eval splits.
-- [ ] Improve initialization beyond `points.ply` plus fixed scale/opacity:
+- [x] Improve initialization beyond `points.ply` plus fixed scale/opacity:
   scene scale, world normalization, camera normalization, and SfM-style scale
-  initialization should be validated against gsplat behavior.
+  initialization should be validated against gsplat behavior. Current first pass
+  adds points-extent scene scale diagnostics and scene-fraction point scale.
 
 ### Remaining Low-Level gsplat API Parity
 - Temporary Metal/CUDA low-level parity tracking lives in `Task_Metal.md`.
@@ -1358,8 +1359,11 @@
 - [x] Task 6.30F: Improve scanner dataloader behavior with frame shuffling,
   mini-batch camera/image support, and explicit train/eval split controls.
   Debug: `scripts/test/scanner_dataloader_debug.py`.
-- [ ] Task 6.30G: Improve scene initialization with scene scale estimation,
+- [x] Task 6.30G: Improve scene initialization with scene scale estimation,
   normalization, and point-neighborhood scale initialization.
+  First pass: points-extent scene scale and scene-fraction point scale, without
+  camera/world normalization or point-neighborhood scale estimation yet.
+  Debug: `scripts/test/scanner_initialization_debug.py`.
 - [ ] Task 6.30H: Keep packed paths, sparse gradients, and visible Adam as later
   performance tasks after dense training quality is stable.
 - [ ] Task 6.30I: Keep camera optimization, appearance embedding, exposure,

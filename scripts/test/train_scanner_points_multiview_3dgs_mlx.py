@@ -790,6 +790,51 @@ def append_random_gaussians(
     )
 
 
+def points_extent_diagnostics(points: np.ndarray) -> dict:
+    points = np.asarray(points, dtype=np.float32)
+    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
+        raise ValueError("points must have shape [N, 3] and be nonempty")
+    bbox_min = points.min(axis=0)
+    bbox_max = points.max(axis=0)
+    center = (bbox_min + bbox_max) * 0.5
+    half_extent = (bbox_max - bbox_min) * 0.5
+    distances = np.linalg.norm(points - center[None, :], axis=1)
+    return {
+        "point_count": int(points.shape[0]),
+        "bbox_min": bbox_min.astype(float).tolist(),
+        "bbox_max": bbox_max.astype(float).tolist(),
+        "center": center.astype(float).tolist(),
+        "bbox_size": (bbox_max - bbox_min).astype(float).tolist(),
+        "bbox_diagonal": float(np.linalg.norm(bbox_max - bbox_min)),
+        "max_radius": float(distances.max()),
+        "p90_radius": float(np.percentile(distances, 90.0)),
+        "p95_radius": float(np.percentile(distances, 95.0)),
+        "p99_radius": float(np.percentile(distances, 99.0)),
+    }
+
+
+def select_scene_scale(diagnostics: dict, mode: str, fixed_scale: float) -> float:
+    if mode == "fixed":
+        return float(fixed_scale)
+    if mode == "points_extent":
+        return float(max(diagnostics["p95_radius"], 1.0e-6))
+    raise ValueError(f"Unsupported scene scale mode: {mode}")
+
+
+def select_point_scale(
+    diagnostics: dict,
+    mode: str,
+    fixed_scale: float,
+    fraction: float,
+) -> float:
+    if mode == "fixed":
+        return float(fixed_scale)
+    if mode == "scene_fraction":
+        scene_scale = float(max(diagnostics["p95_radius"], 1.0e-6))
+        return float(max(scene_scale * fraction, 1.0e-8))
+    raise ValueError(f"Unsupported point scale mode: {mode}")
+
+
 def camera_center_from_viewmat(viewmats: mx.array) -> mx.array:
     rot = viewmats[:, :, :3, :3]
     trans = viewmats[:, :, :3, 3]
@@ -1414,6 +1459,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-random-gaussians", type=int, default=0)
     parser.add_argument("--random-gaussian-bounds-scale", type=float, default=1.05)
     parser.add_argument("--point-scale", type=float, default=0.01)
+    parser.add_argument("--point-scale-mode", choices=("fixed", "scene_fraction"), default="scene_fraction")
+    parser.add_argument("--point-scale-fraction", type=float, default=0.005)
     parser.add_argument("--opacity", type=float, default=0.65)
     parser.add_argument("--seed", type=int, default=37)
     parser.add_argument("--steps", type=int, default=200)
@@ -1468,6 +1515,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refine-every", type=int, default=100)
     parser.add_argument("--refine-pause-after-reset", type=int, default=0)
     parser.add_argument("--refine-scene-scale", type=float, default=1.0)
+    parser.add_argument("--refine-scene-scale-mode", choices=("fixed", "points_extent"), default="points_extent")
     parser.add_argument("--refine-absgrad", action="store_true")
     parser.add_argument("--refine-revised-opacity", action="store_true")
     return parser.parse_args()
@@ -1505,6 +1553,10 @@ def main() -> None:
         raise ValueError("--num-random-gaussians must be nonnegative")
     if args.random_gaussian_bounds_scale <= 0.0:
         raise ValueError("--random-gaussian-bounds-scale must be positive")
+    if args.point_scale <= 0.0:
+        raise ValueError("--point-scale must be positive")
+    if args.point_scale_fraction <= 0.0:
+        raise ValueError("--point-scale-fraction must be positive")
     if args.eval_max_frames < 0:
         raise ValueError("--eval-max-frames must be nonnegative")
     if args.batch_size <= 0:
@@ -1573,24 +1625,6 @@ def main() -> None:
         args.lr_quats_delay_mult,
         lr_quats_max_steps,
     )
-    strategy_config = ScannerDefaultStrategyConfig(
-        enabled=args.refine_enabled,
-        prune_opa=args.refine_prune_opa,
-        grow_grad2d=args.refine_grow_grad2d,
-        grow_scale3d=args.refine_grow_scale3d,
-        grow_scale2d=args.refine_grow_scale2d,
-        prune_scale3d=args.refine_prune_scale3d,
-        prune_scale2d=args.refine_prune_scale2d,
-        refine_scale2d_stop_iter=args.refine_scale2d_stop_iter,
-        refine_start_iter=args.refine_start_iter,
-        refine_stop_iter=args.refine_stop_iter,
-        reset_every=args.refine_reset_every,
-        refine_every=args.refine_every,
-        pause_refine_after_reset=args.refine_pause_after_reset,
-        scene_scale=args.refine_scene_scale,
-        absgrad=args.refine_absgrad,
-        revised_opacity=args.refine_revised_opacity,
-    )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     frames = collect_frames(args.data, args.max_frames, args.frame_step, args.start_index)
     eval_start_index = args.eval_start_index if args.eval_start_index is not None else frames[-1].index + 1
@@ -1613,10 +1647,50 @@ def main() -> None:
         args.seed + 1009,
         args.random_gaussian_bounds_scale,
     )
+    point_diagnostics = points_extent_diagnostics(points)
+    resolved_point_scale = select_point_scale(
+        point_diagnostics,
+        args.point_scale_mode,
+        args.point_scale,
+        args.point_scale_fraction,
+    )
+    resolved_refine_scene_scale = select_scene_scale(
+        point_diagnostics,
+        args.refine_scene_scale_mode,
+        args.refine_scene_scale,
+    )
+    initialization_diagnostics = {
+        "point_extent": point_diagnostics,
+        "point_scale_mode": args.point_scale_mode,
+        "point_scale_fixed": float(args.point_scale),
+        "point_scale_fraction": float(args.point_scale_fraction),
+        "resolved_point_scale": float(resolved_point_scale),
+        "refine_scene_scale_mode": args.refine_scene_scale_mode,
+        "refine_scene_scale_fixed": float(args.refine_scene_scale),
+        "resolved_refine_scene_scale": float(resolved_refine_scene_scale),
+    }
+    strategy_config = ScannerDefaultStrategyConfig(
+        enabled=args.refine_enabled,
+        prune_opa=args.refine_prune_opa,
+        grow_grad2d=args.refine_grow_grad2d,
+        grow_scale3d=args.refine_grow_scale3d,
+        grow_scale2d=args.refine_grow_scale2d,
+        prune_scale3d=args.refine_prune_scale3d,
+        prune_scale2d=args.refine_prune_scale2d,
+        refine_scale2d_stop_iter=args.refine_scale2d_stop_iter,
+        refine_start_iter=args.refine_start_iter,
+        refine_stop_iter=args.refine_stop_iter,
+        reset_every=args.refine_reset_every,
+        refine_every=args.refine_every,
+        pause_refine_after_reset=args.refine_pause_after_reset,
+        scene_scale=resolved_refine_scene_scale,
+        absgrad=args.refine_absgrad,
+        revised_opacity=args.refine_revised_opacity,
+    )
     if args.color_mode == "rgb":
-        model = init_rgb_model_from_points(points, colors, args.point_scale, args.opacity)
+        model = init_rgb_model_from_points(points, colors, resolved_point_scale, args.opacity)
     else:
-        model = init_sh_model_from_points(points, colors, args.point_scale, args.opacity, args.max_sh_degree)
+        model = init_sh_model_from_points(points, colors, resolved_point_scale, args.opacity, args.max_sh_degree)
     strategy = ScannerDefaultStrategyRuntime(strategy_config, initial_gaussians=model.means.shape[1])
 
     initial_stats = evaluate_current_frames(
@@ -2045,6 +2119,7 @@ def main() -> None:
         "eval_start_index": eval_start_index if eval_cameras else None,
         "eval_frame_step": eval_frame_step if eval_cameras else None,
         "steps": args.steps,
+        "initialization": initialization_diagnostics,
         "dataloader": sampler.summary(cameras),
         "loss_function": args.loss_mode,
         "loss_config": {
