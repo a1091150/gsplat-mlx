@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import struct
-import zlib
-from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
+
+DATASET_DIR = Path(__file__).resolve().parents[1] / "dataset"
+if str(DATASET_DIR) not in sys.path:
+    sys.path.insert(0, str(DATASET_DIR))
+
+from b075x65r3x_dataset import load_b075x65r3x_dataset
+from dodecahedron_dataset import load_dodecahedron_dataset
+from training_dataset import TrainingCamera, TrainingDataset, image_to_u8, write_png
 
 
-BG = np.array([0.025, 0.025, 0.025], dtype=np.float32)
 SH_C0 = 0.28209479177387814
 mx = None
 Adam = None
@@ -24,42 +29,11 @@ normalize_quats = None
 render_model = None
 render_sh_model = None
 sh_coeff_count = None
-
-
-@dataclass
-class FixedCamera:
-    index: int
-    viewmat: np.ndarray
-    K: np.ndarray
-    position: np.ndarray
-    target: np.ndarray
-
-
-def write_png(path: Path, image: np.ndarray) -> None:
-    if image.dtype != np.uint8 or image.ndim != 3 or image.shape[-1] != 3:
-        raise ValueError("write_png expects uint8 RGB image with shape [H, W, 3].")
-    height, width, _ = image.shape
-    raw = b"".join(b"\x00" + image[y].tobytes() for y in range(height))
-
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        payload = kind + data
-        return (
-            struct.pack(">I", len(data))
-            + payload
-            + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
-        )
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(raw, level=6))
-        + chunk(b"IEND", b"")
-    )
-
-
-def image_to_u8(image: np.ndarray) -> np.ndarray:
-    return (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+sh_colors_for_camera = None
+projection_ewa_3dgs_fused_forward = None
+intersect_tile_forward = None
+intersect_offset_forward = None
+rasterize_to_pixels_3dgs_forward = None
 
 
 def logit(values: np.ndarray) -> np.ndarray:
@@ -68,14 +42,20 @@ def logit(values: np.ndarray) -> np.ndarray:
 
 
 def load_training_deps() -> None:
-    global Adam, ScannerPointsSHModel, active_sh_degree_for_step, mx, normalize_quats, render_sh_model, sh_coeff_count
+    global Adam, ScannerPointsSHModel, active_sh_degree_for_step, intersect_offset_forward, intersect_tile_forward, mx, normalize_quats
+    global projection_ewa_3dgs_fused_forward, rasterize_to_pixels_3dgs_forward, render_sh_model, sh_coeff_count, sh_colors_for_camera
     import mlx.core as mlx_core
     from mlx.optimizers import Adam as MlxAdam
+    from gsplat_core import intersect_offset_forward as gs_intersect_offset_forward
+    from gsplat_core import intersect_tile_forward as gs_intersect_tile_forward
+    from gsplat_core import projection_ewa_3dgs_fused_forward as gs_projection_ewa_3dgs_fused_forward
+    from gsplat_core import rasterize_to_pixels_3dgs_forward as gs_rasterize_to_pixels_3dgs_forward
     from train_tiny_3dgs_mlx import normalize_quats as tiny_normalize_quats
     from train_scanner_points_multiview_3dgs_mlx import ScannerPointsSHModel as ScannerSHModel
     from train_scanner_points_multiview_3dgs_mlx import active_sh_degree_for_step as scanner_active_sh_degree_for_step
     from train_scanner_points_multiview_3dgs_mlx import render_sh_model as scanner_render_sh_model
     from train_scanner_points_multiview_3dgs_mlx import sh_coeff_count as scanner_sh_coeff_count
+    from train_scanner_points_multiview_3dgs_mlx import sh_colors_for_camera as scanner_sh_colors_for_camera
 
     mx = mlx_core
     Adam = MlxAdam
@@ -84,196 +64,26 @@ def load_training_deps() -> None:
     normalize_quats = tiny_normalize_quats
     render_sh_model = scanner_render_sh_model
     sh_coeff_count = scanner_sh_coeff_count
+    sh_colors_for_camera = scanner_sh_colors_for_camera
+    projection_ewa_3dgs_fused_forward = gs_projection_ewa_3dgs_fused_forward
+    intersect_tile_forward = gs_intersect_tile_forward
+    intersect_offset_forward = gs_intersect_offset_forward
+    rasterize_to_pixels_3dgs_forward = gs_rasterize_to_pixels_3dgs_forward
 
 
 def is_power_of_two(value: int) -> bool:
     return value > 0 and (value & (value - 1)) == 0
 
 
-def dodecahedron_geometry() -> tuple[np.ndarray, list[list[int]], np.ndarray]:
-    phi = (1.0 + np.sqrt(5.0)) * 0.5
-    normals = []
-    for s1 in (-1.0, 1.0):
-        for s2 in (-1.0, 1.0):
-            normals.append([0.0, s1, s2 * phi])
-            normals.append([s1, s2 * phi, 0.0])
-            normals.append([s1 * phi, 0.0, s2])
-    normals = np.asarray(normals, dtype=np.float64)
-    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
-
-    vertices = []
-    for i in range(len(normals)):
-        for j in range(i + 1, len(normals)):
-            for k in range(j + 1, len(normals)):
-                mat = np.stack([normals[i], normals[j], normals[k]], axis=0)
-                if abs(np.linalg.det(mat)) < 1.0e-8:
-                    continue
-                point = np.linalg.solve(mat, np.ones((3,), dtype=np.float64))
-                if np.all(normals @ point <= 1.0 + 1.0e-6):
-                    vertices.append(point)
-    verts = []
-    for point in vertices:
-        if not any(np.linalg.norm(point - prev) < 1.0e-5 for prev in verts):
-            verts.append(point)
-    vertices_np = np.asarray(verts, dtype=np.float64)
-    vertices_np /= np.max(np.linalg.norm(vertices_np, axis=1))
-
-    faces: list[list[int]] = []
-    for normal in normals:
-        face = np.where(np.abs(vertices_np @ normal - np.max(vertices_np @ normal)) < 1.0e-5)[0]
-        center = vertices_np[face].mean(axis=0)
-        axis_u = vertices_np[face[0]] - center
-        axis_u /= np.linalg.norm(axis_u)
-        axis_v = np.cross(normal, axis_u)
-        angles = np.arctan2((vertices_np[face] - center) @ axis_v, (vertices_np[face] - center) @ axis_u)
-        faces.append(face[np.argsort(angles)].astype(int).tolist())
-    return vertices_np.astype(np.float32), faces, normals.astype(np.float32)
-
-
-def face_colors(count: int) -> np.ndarray:
-    start = np.array([1.0, 0.04, 0.02], dtype=np.float32)
-    mid = np.array([0.06, 0.74, 0.95], dtype=np.float32)
-    end = np.array([0.62, 0.08, 0.90], dtype=np.float32)
-    t = np.linspace(0.0, 1.0, count, dtype=np.float32)[:, None]
-    first = (1.0 - np.minimum(t * 2.0, 1.0)) * start + np.minimum(t * 2.0, 1.0) * mid
-    second = (1.0 - np.maximum((t - 0.5) * 2.0, 0.0)) * mid + np.maximum((t - 0.5) * 2.0, 0.0) * end
-    return np.where(t <= 0.5, first, second).astype(np.float32)
-
-
-def look_at_viewmat(position: np.ndarray, target: np.ndarray = np.zeros(3, dtype=np.float32)) -> np.ndarray:
-    forward = target - position
-    forward = forward / np.linalg.norm(forward)
-    up_guess = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-    if abs(float(np.dot(forward, up_guess))) > 0.95:
-        up_guess = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    right = np.cross(up_guess, forward)
-    right = right / np.linalg.norm(right)
-    up = np.cross(forward, right)
-    rot = np.stack([right, up, forward], axis=0)
-    view = np.eye(4, dtype=np.float32)
-    view[:3, :3] = rot
-    view[:3, 3] = -rot @ position
-    return view
-
-
-def make_camera_positions(count: int, radius: float) -> np.ndarray:
-    positions = []
-    golden = np.pi * (3.0 - np.sqrt(5.0))
-    for i in range(count):
-        y = 1.0 - 2.0 * (i + 0.5) / float(count)
-        r = np.sqrt(max(0.0, 1.0 - y * y))
-        theta = golden * i
-        positions.append([radius * r * np.cos(theta), radius * y, radius * r * np.sin(theta)])
-    return np.asarray(positions, dtype=np.float32)
-
-
-def make_intrinsics(width: int, height: int, focal_scale: float) -> np.ndarray:
-    focal = focal_scale * float(min(width, height))
-    return np.array(
-        [[focal, 0.0, width * 0.5], [0.0, focal, height * 0.5], [0.0, 0.0, 1.0]],
-        dtype=np.float32,
-    )
-
-
-def project_vertices(vertices: np.ndarray, viewmat: np.ndarray, K: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    verts_h = np.concatenate([vertices, np.ones((vertices.shape[0], 1), dtype=np.float32)], axis=1)
-    cam = (viewmat @ verts_h.T).T[:, :3]
-    z = np.clip(cam[:, 2], 1.0e-5, None)
-    uv = np.empty((vertices.shape[0], 2), dtype=np.float32)
-    uv[:, 0] = K[0, 0] * cam[:, 0] / z + K[0, 2]
-    uv[:, 1] = K[1, 1] * cam[:, 1] / z + K[1, 2]
-    return uv, cam
-
-
-def render_dodecahedron(
-    vertices: np.ndarray,
-    faces: list[list[int]],
-    normals: np.ndarray,
-    colors: np.ndarray,
-    viewmat: np.ndarray,
-    K: np.ndarray,
-    width: int,
-    height: int,
-) -> np.ndarray:
-    uv, cam = project_vertices(vertices, viewmat, K)
-    image = Image.new("RGB", (width, height), tuple((BG * 255).astype(np.uint8).tolist()))
-    draw = ImageDraw.Draw(image)
-    rot = viewmat[:3, :3]
-    visible_faces = []
-    for face_id, face in enumerate(faces):
-        if np.any(cam[face, 2] <= 0.01):
-            continue
-        normal_cam = rot @ normals[face_id]
-        center_cam = cam[face].mean(axis=0)
-        if float(np.dot(normal_cam, center_cam)) < 0.0:
-            visible_faces.append(face_id)
-    face_order = sorted(visible_faces, key=lambda idx: float(np.mean(cam[faces[idx], 2])), reverse=True)
-    for face_id in face_order:
-        face = faces[face_id]
-        if np.any(cam[face, 2] <= 0.01):
-            continue
-        pts = [(float(uv[idx, 0]), float(uv[idx, 1])) for idx in face]
-        color = tuple((np.clip(colors[face_id], 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8).tolist())
-        draw.polygon(pts, fill=color, outline=(255, 255, 255))
-    line_width = max(1, int(round(min(width, height) / 192.0)))
-    for face_id in face_order:
-        face = faces[face_id]
-        if np.any(cam[face, 2] <= 0.01):
-            continue
-        pts = [(float(uv[idx, 0]), float(uv[idx, 1])) for idx in face]
-        draw.line(pts + [pts[0]], fill=(255, 255, 255), width=line_width)
-    return np.asarray(image, dtype=np.float32) / 255.0
-
-
-def generate_dataset(out_dir: Path, width: int, height: int, camera_count: int, radius: float, focal_scale: float) -> list[FixedCamera]:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    vertices, faces, normals = dodecahedron_geometry()
-    colors = face_colors(len(faces))
-    K = make_intrinsics(width, height, focal_scale)
-    cameras = []
-    metadata = {
-        "width": width,
-        "height": height,
-        "camera_count": camera_count,
-        "camera_radius": radius,
-        "focal_scale": focal_scale,
-        "vertices": vertices.astype(float).tolist(),
-        "faces": faces,
-        "face_colors": colors.astype(float).tolist(),
-        "frames": [],
-    }
-    for idx, position in enumerate(make_camera_positions(camera_count, radius)):
-        viewmat = look_at_viewmat(position)
-        target = render_dodecahedron(vertices, faces, normals, colors, viewmat, K, width, height)
-        image_path = out_dir / f"frame_{idx:03d}.png"
-        write_png(image_path, image_to_u8(target))
-        cameras.append(FixedCamera(idx, viewmat, K.copy(), position, target))
-        metadata["frames"].append(
-            {
-                "index": idx,
-                "image_path": str(image_path),
-                "position": position.astype(float).tolist(),
-                "viewmat": viewmat.astype(float).tolist(),
-                "K": K.astype(float).tolist(),
-            }
-        )
-    (out_dir / "dataset_summary.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    return cameras
-
-
-def sample_gaussians(
+def sample_bbox_gaussians(
     num_gaussians: int,
     seed: int,
-    vertices: np.ndarray,
-    faces: list[list[int]],
-    colors: np.ndarray,
+    bbox_min: np.ndarray,
+    bbox_max: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     if not is_power_of_two(num_gaussians):
         raise ValueError(f"--num-gaussians must be a power of two, got {num_gaussians}")
     rng = np.random.default_rng(seed)
-    del faces, colors
-    bbox_min = vertices.min(axis=0)
-    bbox_max = vertices.max(axis=0)
     pad = 0.08 * float(np.max(bbox_max - bbox_min))
     means = rng.uniform(
         bbox_min - pad,
@@ -290,7 +100,48 @@ def sample_gaussians(
     return means, quats, np.log(scales).astype(np.float32), color_logits, logit(opacities)
 
 
-def camera_arrays(camera: FixedCamera) -> tuple[mx.array, mx.array]:
+def sample_foreground_gaussians(
+    num_gaussians: int,
+    seed: int,
+    dataset: TrainingDataset,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if not is_power_of_two(num_gaussians):
+        raise ValueError(f"--num-gaussians must be a power of two, got {num_gaussians}")
+    points = dataset.foreground_points
+    colors = dataset.foreground_colors
+    if points is None or colors is None or len(points) == 0:
+        raise ValueError(f"{dataset.name} does not provide foreground points; use --init-mode bbox instead.")
+
+    rng = np.random.default_rng(seed)
+    replace = len(points) < num_gaussians
+    ids = rng.choice(len(points), size=num_gaussians, replace=replace)
+    means = points[ids][None, ...].astype(np.float32)
+    sampled_colors = np.clip(colors[ids], 0.02, 0.98).astype(np.float32)
+    color_logits = logit(sampled_colors[None, None, ...])
+
+    quats = np.zeros((1, num_gaussians, 4), dtype=np.float32)
+    quats[0, :, 0] = 1.0
+    quats += rng.normal(0.0, 0.01, size=quats.shape).astype(np.float32)
+
+    extent = float(np.max(dataset.bbox_max - dataset.bbox_min))
+    base_scale = max(extent * 0.01, 1.0e-4)
+    scales = rng.uniform(base_scale * 0.5, base_scale * 1.5, size=(1, num_gaussians, 3)).astype(np.float32)
+    opacities = np.full((1, num_gaussians), 0.65, dtype=np.float32)
+    return means, quats, np.log(scales).astype(np.float32), color_logits, logit(opacities)
+
+
+def sample_initial_gaussians(
+    init_mode: str,
+    num_gaussians: int,
+    seed: int,
+    dataset: TrainingDataset,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if init_mode == "bbox":
+        return sample_bbox_gaussians(num_gaussians, seed, dataset.bbox_min, dataset.bbox_max)
+    return sample_foreground_gaussians(num_gaussians, seed, dataset)
+
+
+def camera_arrays(camera: TrainingCamera) -> tuple[mx.array, mx.array]:
     return (
         mx.array(camera.viewmat[None, None, ...], dtype=mx.float32),
         mx.array(camera.K[None, None, ...], dtype=mx.float32),
@@ -299,35 +150,112 @@ def camera_arrays(camera: FixedCamera) -> tuple[mx.array, mx.array]:
 
 def render_np(
     model,
-    camera: FixedCamera,
+    camera: TrainingCamera,
     width: int,
     height: int,
     tile_size: int,
     sh_degree: int,
+    background_color: np.ndarray,
 ) -> tuple[np.ndarray, dict]:
     viewmats, Ks = camera_arrays(camera)
     viewspace = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
-    render = render_sh_model(model, viewspace, viewmats, Ks, width, height, tile_size, sh_degree)
+    render = render_sh_model_background(model, viewspace, viewmats, Ks, width, height, tile_size, sh_degree, background_color)
     mx.eval(render["render_colors"], render["radii"], render["flatten_ids"])
     return np.asarray(render["render_colors"][0], dtype=np.float32), render
+
+
+def render_sh_model_background(
+    model,
+    viewspace_points,
+    viewmats,
+    Ks,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+    background_color: np.ndarray,
+) -> dict:
+    tile_width = (width + tile_size - 1) // tile_size
+    tile_height = (height + tile_size - 1) // tile_size
+    projection = projection_ewa_3dgs_fused_forward(
+        {
+            "means": model.means,
+            "quats": model.normalized_quats,
+            "scales": model.scales,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "viewspace_points": viewspace_points,
+        },
+        image_width=width,
+        image_height=height,
+        eps2d=0.3,
+        near_plane=0.01,
+        far_plane=100.0,
+        radius_clip=0.0,
+        calc_compensations=False,
+        camera_model=0,
+    )
+    intersections = intersect_tile_forward(
+        {
+            "means2d": projection["means2d"],
+            "radii": projection["radii"],
+            "depths": projection["depths"],
+        },
+        I=1,
+        tile_size=tile_size,
+        tile_width=tile_width,
+        tile_height=tile_height,
+        sort=True,
+        segmented=False,
+    )
+    tile_offsets = mx.stop_gradient(
+        intersect_offset_forward(
+            intersections["isect_ids"],
+            I=1,
+            tile_width=tile_width,
+            tile_height=tile_height,
+        )
+    )
+    flatten_ids = mx.stop_gradient(intersections["flatten_ids"])
+    render = rasterize_to_pixels_3dgs_forward(
+        {
+            "means2d": projection["means2d"],
+            "conics": projection["conics"],
+            "colors": sh_colors_for_camera(model, viewmats, sh_degree),
+            "opacities": mx.expand_dims(model.opacities, axis=1),
+            "backgrounds": mx.array(np.asarray(background_color, dtype=np.float32)[None, :], dtype=mx.float32),
+            "tile_offsets": tile_offsets,
+            "flatten_ids": flatten_ids,
+        },
+        image_width=width,
+        image_height=height,
+        tile_size=tile_size,
+    )
+    return {
+        **render,
+        "radii": projection["radii"],
+        "tiles_per_gauss": mx.stop_gradient(intersections["tiles_per_gauss"]),
+        "flatten_ids": flatten_ids,
+    }
 
 
 def save_grid(
     path: Path,
     model,
-    cameras: list[FixedCamera],
+    cameras: list[TrainingCamera],
     view_ids: list[int],
     width: int,
     height: int,
     tile_size: int,
     sh_degree: int,
+    background_color: np.ndarray,
 ) -> None:
     tile_w = 192
     tile_h = 96
     tiles = []
     for view_id in view_ids:
         camera = cameras[view_id]
-        render, _ = render_np(model, camera, width, height, tile_size, sh_degree)
+        render, _ = render_np(model, camera, width, height, tile_size, sh_degree, background_color)
         pair = np.concatenate([camera.target, render], axis=1)
         image = Image.fromarray(image_to_u8(pair)).resize((tile_w, tile_h), Image.Resampling.BILINEAR)
         tiles.append(np.asarray(image, dtype=np.uint8))
@@ -339,6 +267,20 @@ def save_grid(
         col = idx % grid_cols
         grid[row * tile_h : (row + 1) * tile_h, col * tile_w : (col + 1) * tile_w] = tile
     write_png(path, grid)
+
+
+def select_grid_ids(camera_count: int, requested_tiles: int) -> list[int]:
+    if camera_count <= 0:
+        raise ValueError("Cannot select grid views from an empty dataset.")
+    tile_count = min(max(int(requested_tiles), 1), camera_count)
+    if tile_count == 1:
+        return [0]
+    ids = np.rint(np.linspace(0, camera_count - 1, tile_count)).astype(int)
+    return np.clip(ids, 0, camera_count - 1).tolist()
+
+
+def should_save_grid(step: int, total_steps: int, grid_interval: int) -> bool:
+    return step == 1 or step == total_steps or (grid_interval > 0 and step % grid_interval == 0)
 
 
 def save_model_npz(path: Path, model, active_sh_degree: int, max_sh_degree: int, summary: dict) -> None:
@@ -395,6 +337,8 @@ def export_spz(path: Path, model, active_sh_degree: int) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", choices=("b075x65r3x", "dodecahedron"), default="b075x65r3x")
+    parser.add_argument("--data", type=Path, default=Path("datasets/B075X65R3X"))
     parser.add_argument("--dataset-out", type=Path, default=Path("outputs/fixed_points_dataset"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/fixed_points_train"))
     parser.add_argument("--dataset-only", action="store_true")
@@ -403,7 +347,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--tile-size", type=int, default=16)
     parser.add_argument("--num-cameras", type=int, default=48)
+    parser.add_argument("--max-frames", type=int, default=0)
+    parser.add_argument("--frame-step", type=int, default=1)
+    parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--num-gaussians", type=int, default=1024)
+    parser.add_argument("--init-mode", choices=("foreground", "bbox"), default="foreground")
     parser.add_argument("--steps", type=int, default=2000)
     parser.add_argument("--grid-interval", type=int, default=200)
     parser.add_argument("--grid-tiles", type=int, default=16)
@@ -420,25 +368,48 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_dataset(args: argparse.Namespace) -> TrainingDataset:
+    if args.dataset == "dodecahedron":
+        return load_dodecahedron_dataset(
+            args.dataset_out,
+            args.width,
+            args.height,
+            args.num_cameras,
+            args.camera_radius,
+            args.focal_scale,
+        )
+    return load_b075x65r3x_dataset(
+        args.data,
+        args.width,
+        args.height,
+        max_frames=args.max_frames,
+        frame_step=args.frame_step,
+        start_index=args.start_index,
+    )
+
+
 def main() -> None:
     args = parse_args()
-    cameras = generate_dataset(args.dataset_out, args.width, args.height, args.num_cameras, args.camera_radius, args.focal_scale)
+    dataset = load_dataset(args)
+    cameras = dataset.cameras
     if args.dataset_only:
-        print(f"fixed-points dataset ok frames={len(cameras)} output_dir={args.dataset_out}")
+        print(f"{dataset.name} dataset ok frames={len(cameras)}")
         return
 
     load_training_deps()
     if args.sh_degree_start < 0 or args.sh_degree_target < args.sh_degree_start or args.sh_degree_target > 3:
         raise ValueError("--sh-degree-start/target must satisfy 0 <= start <= target <= 3")
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    vertices, faces, _ = dodecahedron_geometry()
-    colors = face_colors(len(faces))
-    means, quats, log_scales, color_logits, opacity_logits = sample_gaussians(
+    background_color = (
+        dataset.background_color.astype(np.float32)
+        if dataset.background_color is not None
+        else np.array([0.025, 0.025, 0.025], dtype=np.float32)
+    )
+    means, quats, log_scales, color_logits, opacity_logits = sample_initial_gaussians(
+        args.init_mode,
         args.num_gaussians,
         args.seed,
-        vertices,
-        faces,
-        colors,
+        dataset,
     )
     random_colors = 1.0 / (1.0 + np.exp(-color_logits[:, 0]))
     features_dc = ((random_colors - 0.5) / SH_C0).astype(np.float32)
@@ -452,7 +423,7 @@ def main() -> None:
         mx.array(opacity_logits, dtype=mx.float32),
     )
     targets = [mx.array(camera.target[None, ...], dtype=mx.float32) for camera in cameras]
-    grid_ids = np.linspace(0, len(cameras) - 1, min(args.grid_tiles, len(cameras)), dtype=np.int32).astype(int).tolist()
+    grid_ids = select_grid_ids(len(cameras), args.grid_tiles)
 
     def loss_fn(
         means_: mx.array,
@@ -468,7 +439,17 @@ def main() -> None:
         sh_degree_: int,
     ) -> mx.array:
         local = ScannerPointsSHModel.from_arrays(means_, quats_, log_scales_, features_dc_, features_rest_, opacity_logits_)
-        render = render_sh_model(local, viewspace_points_, viewmats_, Ks_, args.width, args.height, args.tile_size, sh_degree_)
+        render = render_sh_model_background(
+            local,
+            viewspace_points_,
+            viewmats_,
+            Ks_,
+            args.width,
+            args.height,
+            args.tile_size,
+            sh_degree_,
+            background_color,
+        )
         diff = render["render_colors"] - target_
         return mx.mean(mx.abs(diff))
 
@@ -496,7 +477,17 @@ def main() -> None:
 
     initial_active_sh_degree = int(args.sh_degree_start)
     initial_mean_loss = evaluate_loss(initial_active_sh_degree)
-    save_grid(args.out_dir / "grid_step_0000.png", model, cameras, grid_ids, args.width, args.height, args.tile_size, initial_active_sh_degree)
+    save_grid(
+        args.out_dir / "grid_step_0000.png",
+        model,
+        cameras,
+        grid_ids,
+        args.width,
+        args.height,
+        args.tile_size,
+        initial_active_sh_degree,
+        background_color,
+    )
     grad_fn = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
     optimizers = {
         "means": Adam(learning_rate=args.lr_means),
@@ -553,10 +544,20 @@ def main() -> None:
         model.quats = normalize_quats(model.quats)
         mx.eval(model.means, model.quats, model.log_scales, model.features_dc, model.features_rest, model.opacity_logits)
 
-        if step == 1 or step == args.steps or step % args.grid_interval == 0:
+        if should_save_grid(step, args.steps, args.grid_interval):
             print(f"step={step:04d} view={view_id:02d} sh_degree={active_sh_degree} loss={last_loss:.8f}")
-        if step % args.grid_interval == 0:
-            save_grid(args.out_dir / f"grid_step_{step:04d}.png", model, cameras, grid_ids, args.width, args.height, args.tile_size, active_sh_degree)
+        if step == args.steps or (args.grid_interval > 0 and step % args.grid_interval == 0):
+            save_grid(
+                args.out_dir / f"grid_step_{step:04d}.png",
+                model,
+                cameras,
+                grid_ids,
+                args.width,
+                args.height,
+                args.tile_size,
+                active_sh_degree,
+                background_color,
+            )
 
     final_mean_loss = evaluate_loss(active_sh_degree)
     if last_loss is None or not np.isfinite(final_mean_loss):
@@ -567,12 +568,17 @@ def main() -> None:
         raise AssertionError("fixed-points training expected nonzero viewspace_points gradient")
 
     summary = {
-        "dataset": str(args.dataset_out),
+        "dataset": args.dataset,
+        "dataset_path": str(args.data if args.dataset == "b075x65r3x" else args.dataset_out),
+        "dataset_metadata": dataset.metadata,
         "out_dir": str(args.out_dir),
         "width": args.width,
         "height": args.height,
         "cameras": len(cameras),
         "gaussians": args.num_gaussians,
+        "init_mode": args.init_mode,
+        "foreground_points": 0 if dataset.foreground_points is None else int(dataset.foreground_points.shape[0]),
+        "background_color": background_color.astype(float).tolist(),
         "steps": args.steps,
         "grid_interval": args.grid_interval,
         "grid_tiles": len(grid_ids),

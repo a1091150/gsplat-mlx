@@ -35,18 +35,24 @@ SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
 SCANNER_TRAIN_STEPS ?= 2000
 
+FIXED_POINTS_DATASET ?= b075x65r3x
+FIXED_POINTS_DATA ?= datasets/B075X65R3X
 FIXED_POINTS_DATASET_OUT ?= outputs/fixed_points_dataset
 FIXED_POINTS_TRAIN_OUT ?= outputs/fixed_points_train
 FIXED_POINTS_WIDTH ?= 512
 FIXED_POINTS_HEIGHT ?= 512
 FIXED_POINTS_CAMERAS ?= 48
-FIXED_POINTS_GAUSSIANS ?= 4096
-FIXED_POINTS_STEPS ?= 8000
+FIXED_POINTS_MAX_FRAMES ?= 0
+FIXED_POINTS_FRAME_STEP ?= 0
+FIXED_POINTS_START_INDEX ?= 0
+FIXED_POINTS_GAUSSIANS ?= 2048
+FIXED_POINTS_INIT_MODE ?= foreground
+FIXED_POINTS_STEPS ?= 4000
 FIXED_POINTS_GRID_INTERVAL ?= 200
 FIXED_POINTS_GRID_TILES ?= 16
 FIXED_POINTS_SEED ?= 84
 FIXED_POINTS_SH_DEGREE_START ?= 0
-FIXED_POINTS_SH_DEGREE_TARGET ?= 3
+FIXED_POINTS_SH_DEGREE_TARGET ?= 0
 FIXED_POINTS_SH_DEGREE_SCHEDULE_INTERVAL ?= 1000
 
 SPZ_VARIANTS_OUT ?= outputs/spz_variants
@@ -381,12 +387,18 @@ codex-scanner-random-train:
 
 codex-fixed-points-dataset:
 	conda run -n $(CONDA_ENV) python scripts/test/train_fixed_points_3dgs_mlx.py \
+		--dataset "$(FIXED_POINTS_DATASET)" \
+		--data "$(FIXED_POINTS_DATA)" \
 		--dataset-out "$(FIXED_POINTS_DATASET_OUT)" \
 		--out-dir "$(FIXED_POINTS_TRAIN_OUT)" \
 		--width $(FIXED_POINTS_WIDTH) \
 		--height $(FIXED_POINTS_HEIGHT) \
 		--num-cameras $(FIXED_POINTS_CAMERAS) \
+		--max-frames $(FIXED_POINTS_MAX_FRAMES) \
+		--frame-step $(FIXED_POINTS_FRAME_STEP) \
+		--start-index $(FIXED_POINTS_START_INDEX) \
 		--num-gaussians $(FIXED_POINTS_GAUSSIANS) \
+		--init-mode $(FIXED_POINTS_INIT_MODE) \
 		--steps $(FIXED_POINTS_STEPS) \
 		--grid-interval $(FIXED_POINTS_GRID_INTERVAL) \
 		--grid-tiles $(FIXED_POINTS_GRID_TILES) \
@@ -398,12 +410,18 @@ codex-fixed-points-dataset:
 
 codex-fixed-points-train:
 	conda run -n $(CONDA_ENV) python scripts/test/train_fixed_points_3dgs_mlx.py \
+		--dataset "$(FIXED_POINTS_DATASET)" \
+		--data "$(FIXED_POINTS_DATA)" \
 		--dataset-out "$(FIXED_POINTS_DATASET_OUT)" \
 		--out-dir "$(FIXED_POINTS_TRAIN_OUT)" \
 		--width $(FIXED_POINTS_WIDTH) \
 		--height $(FIXED_POINTS_HEIGHT) \
 		--num-cameras $(FIXED_POINTS_CAMERAS) \
+		--max-frames $(FIXED_POINTS_MAX_FRAMES) \
+		--frame-step $(FIXED_POINTS_FRAME_STEP) \
+		--start-index $(FIXED_POINTS_START_INDEX) \
 		--num-gaussians $(FIXED_POINTS_GAUSSIANS) \
+		--init-mode $(FIXED_POINTS_INIT_MODE) \
 		--steps $(FIXED_POINTS_STEPS) \
 		--grid-interval $(FIXED_POINTS_GRID_INTERVAL) \
 		--grid-tiles $(FIXED_POINTS_GRID_TILES) \
