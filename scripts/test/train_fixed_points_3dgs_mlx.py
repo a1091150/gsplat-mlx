@@ -148,6 +148,65 @@ def camera_arrays(camera: TrainingCamera) -> tuple[mx.array, mx.array]:
     )
 
 
+def look_at_viewmat(position: np.ndarray, target: np.ndarray) -> np.ndarray:
+    forward = target - position
+    forward = forward / max(float(np.linalg.norm(forward)), 1.0e-8)
+    up_guess = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    if abs(float(np.dot(forward, up_guess))) > 0.95:
+        up_guess = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    right = np.cross(up_guess, forward)
+    right = right / max(float(np.linalg.norm(right)), 1.0e-8)
+    up = np.cross(forward, right)
+    rot = np.stack([right, up, forward], axis=0).astype(np.float32)
+    view = np.eye(4, dtype=np.float32)
+    view[:3, :3] = rot
+    view[:3, 3] = -rot @ position
+    return view
+
+
+def diagnostic_camera_arrays(
+    dataset: TrainingDataset,
+    reference_camera: TrainingCamera,
+    width: int,
+    height: int,
+) -> tuple[tuple[mx.array, mx.array], tuple[mx.array, mx.array]]:
+    center = ((dataset.bbox_min + dataset.bbox_max) * 0.5).astype(np.float32)
+    extent = max(float(np.max(dataset.bbox_max - dataset.bbox_min)), 1.0e-3)
+    ref_position = reference_camera.position.astype(np.float32)
+    ref_offset = ref_position - center
+    ref_distance = max(float(np.linalg.norm(ref_offset)), extent * 3.0)
+    if float(np.linalg.norm(ref_offset)) < 1.0e-6:
+        ref_offset = np.array([0.0, 0.0, ref_distance], dtype=np.float32)
+
+    back_position = center - ref_offset / max(float(np.linalg.norm(ref_offset)), 1.0e-8) * ref_distance
+    side_axis = np.cross(np.array([0.0, 1.0, 0.0], dtype=np.float32), ref_offset)
+    if float(np.linalg.norm(side_axis)) < 1.0e-6:
+        side_axis = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    side_position = center + side_axis / max(float(np.linalg.norm(side_axis)), 1.0e-8) * ref_distance
+
+    focal = 0.9 * float(min(width, height))
+    K = np.array(
+        [[focal, 0.0, width * 0.5], [0.0, focal, height * 0.5], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    back_viewmat = look_at_viewmat(back_position.astype(np.float32), center)
+    side_viewmat = look_at_viewmat(side_position.astype(np.float32), center)
+    return (
+        (mx.array(back_viewmat[None, None, ...], dtype=mx.float32), mx.array(K[None, None, ...], dtype=mx.float32)),
+        (mx.array(side_viewmat[None, None, ...], dtype=mx.float32), mx.array(K[None, None, ...], dtype=mx.float32)),
+    )
+
+
+def gaussian_index_colors(num_gaussians: int) -> np.ndarray:
+    if num_gaussians <= 1:
+        return np.array([[[[1.0, 0.2, 0.1]]]], dtype=np.float32)
+    t = np.linspace(0.0, 1.0, num_gaussians, dtype=np.float32)
+    phases = np.stack([t, t + 1.0 / 3.0, t + 2.0 / 3.0], axis=-1)
+    colors = 0.5 + 0.5 * np.cos(2.0 * np.pi * phases)
+    colors = 0.12 + 0.88 * colors
+    return colors.reshape(1, 1, num_gaussians, 3).astype(np.float32)
+
+
 def render_np(
     model,
     camera: TrainingCamera,
@@ -156,10 +215,22 @@ def render_np(
     tile_size: int,
     sh_degree: int,
     background_color: np.ndarray,
+    colors_override: mx.array | None = None,
 ) -> tuple[np.ndarray, dict]:
     viewmats, Ks = camera_arrays(camera)
     viewspace = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
-    render = render_sh_model_background(model, viewspace, viewmats, Ks, width, height, tile_size, sh_degree, background_color)
+    render = render_sh_model_background(
+        model,
+        viewspace,
+        viewmats,
+        Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+        colors_override=colors_override,
+    )
     mx.eval(render["render_colors"], render["radii"], render["flatten_ids"])
     return np.asarray(render["render_colors"][0], dtype=np.float32), render
 
@@ -174,6 +245,7 @@ def render_sh_model_background(
     tile_size: int,
     sh_degree: int,
     background_color: np.ndarray,
+    colors_override: mx.array | None = None,
 ) -> dict:
     tile_width = (width + tile_size - 1) // tile_size
     tile_height = (height + tile_size - 1) // tile_size
@@ -221,7 +293,7 @@ def render_sh_model_background(
         {
             "means2d": projection["means2d"],
             "conics": projection["conics"],
-            "colors": sh_colors_for_camera(model, viewmats, sh_degree),
+            "colors": sh_colors_for_camera(model, viewmats, sh_degree) if colors_override is None else colors_override,
             "opacities": mx.expand_dims(model.opacities, axis=1),
             "backgrounds": mx.array(np.asarray(background_color, dtype=np.float32)[None, :], dtype=mx.float32),
             "tile_offsets": tile_offsets,
@@ -267,6 +339,180 @@ def save_grid(
         col = idx % grid_cols
         grid[row * tile_h : (row + 1) * tile_h, col * tile_w : (col + 1) * tile_w] = tile
     write_png(path, grid)
+
+
+def save_dataset_artifacts(out_dir: Path, dataset: TrainingDataset, max_preview_frames: int = 16) -> dict:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cameras = dataset.cameras
+    foreground_count = 0 if dataset.foreground_points is None else int(dataset.foreground_points.shape[0])
+    summary = {
+        "dataset": dataset.name,
+        "frames": len(cameras),
+        "bbox_min": dataset.bbox_min.astype(float).tolist(),
+        "bbox_max": dataset.bbox_max.astype(float).tolist(),
+        "foreground_points": foreground_count,
+        "background_color": None
+        if dataset.background_color is None
+        else dataset.background_color.astype(float).tolist(),
+        "metadata": dataset.metadata,
+        "preview_outputs": [],
+    }
+    if not cameras:
+        (out_dir / "dataset_reader_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        return summary
+
+    preview_count = min(max_preview_frames, len(cameras))
+    preview_ids = select_grid_ids(len(cameras), preview_count)
+    frame_paths = []
+    for view_id in preview_ids:
+        camera = cameras[view_id]
+        frame_path = out_dir / f"target_frame_{camera.index:03d}.png"
+        write_png(frame_path, image_to_u8(camera.target))
+        frame_paths.append(str(frame_path))
+
+    thumb_w = 160
+    thumb_h = 160
+    thumbs = []
+    for view_id in preview_ids:
+        image = Image.fromarray(image_to_u8(cameras[view_id].target)).resize((thumb_w, thumb_h), Image.Resampling.BILINEAR)
+        thumbs.append(np.asarray(image, dtype=np.uint8))
+    grid_cols = min(4, len(thumbs))
+    grid_rows = int(np.ceil(len(thumbs) / grid_cols))
+    preview = np.full((grid_rows * thumb_h, grid_cols * thumb_w, 3), 255, dtype=np.uint8)
+    for idx, thumb in enumerate(thumbs):
+        row = idx // grid_cols
+        col = idx % grid_cols
+        preview[row * thumb_h : (row + 1) * thumb_h, col * thumb_w : (col + 1) * thumb_w] = thumb
+    preview_path = out_dir / "target_preview.png"
+    write_png(preview_path, preview)
+
+    summary["preview_outputs"] = [str(preview_path), *frame_paths]
+    (out_dir / "dataset_reader_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return summary
+
+
+def render_arrays_from_camera_arrays(
+    model,
+    viewmats: mx.array,
+    Ks: mx.array,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+    background_color: np.ndarray,
+    colors_override: mx.array | None = None,
+) -> mx.array:
+    render = render_sh_model_background(
+        model,
+        mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32),
+        viewmats,
+        Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+        colors_override=colors_override,
+    )
+    return render["render_colors"]
+
+
+def save_diagnostic_views(
+    path: Path,
+    model,
+    reference_camera: TrainingCamera,
+    back_camera: tuple[mx.array, mx.array],
+    side_camera: tuple[mx.array, mx.array],
+    id_colors: mx.array,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+    background_color: np.ndarray,
+) -> None:
+    front_viewmats, front_Ks = camera_arrays(reference_camera)
+    back_viewmats, back_Ks = back_camera
+    side_viewmats, side_Ks = side_camera
+    front_render = render_arrays_from_camera_arrays(
+        model,
+        front_viewmats,
+        front_Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+    )
+    back_render = render_arrays_from_camera_arrays(
+        model,
+        back_viewmats,
+        back_Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+    )
+    side_render = render_arrays_from_camera_arrays(
+        model,
+        side_viewmats,
+        side_Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+    )
+    id_render = render_arrays_from_camera_arrays(
+        model,
+        front_viewmats,
+        front_Ks,
+        width,
+        height,
+        tile_size,
+        sh_degree,
+        background_color,
+        colors_override=id_colors,
+    )
+    mx.eval(front_render, back_render, side_render, id_render)
+    views = np.concatenate(
+        [
+            reference_camera.target,
+            np.asarray(front_render[0], dtype=np.float32),
+            np.asarray(back_render[0], dtype=np.float32),
+            np.asarray(side_render[0], dtype=np.float32),
+            np.asarray(id_render[0], dtype=np.float32),
+        ],
+        axis=1,
+    )
+    write_png(path, image_to_u8(views))
+
+
+def array_stats(values: np.ndarray) -> dict[str, float | list[float]]:
+    flat = np.asarray(values, dtype=np.float32).reshape(-1)
+    if flat.size == 0:
+        return {"count": 0}
+    return {
+        "count": int(flat.size),
+        "min": float(np.min(flat)),
+        "mean": float(np.mean(flat)),
+        "p50": float(np.percentile(flat, 50.0)),
+        "p95": float(np.percentile(flat, 95.0)),
+        "max": float(np.max(flat)),
+    }
+
+
+def model_parameter_stats(model) -> dict:
+    mx.eval(model.means, model.log_scales, model.opacities)
+    means = np.asarray(model.means[0], dtype=np.float32)
+    scales = np.exp(np.asarray(model.log_scales[0], dtype=np.float32))
+    opacities = np.asarray(model.opacities[0], dtype=np.float32)
+    return {
+        "means_min": means.min(axis=0).astype(float).tolist(),
+        "means_max": means.max(axis=0).astype(float).tolist(),
+        "scale": array_stats(scales),
+        "opacity": array_stats(opacities),
+    }
 
 
 def select_grid_ids(camera_count: int, requested_tiles: int) -> list[int]:
@@ -393,7 +639,11 @@ def main() -> None:
     dataset = load_dataset(args)
     cameras = dataset.cameras
     if args.dataset_only:
-        print(f"{dataset.name} dataset ok frames={len(cameras)}")
+        summary = save_dataset_artifacts(args.dataset_out, dataset)
+        print(
+            f"{dataset.name} dataset ok frames={len(cameras)} "
+            f"foreground_points={summary['foreground_points']} output_dir={args.dataset_out}"
+        )
         return
 
     load_training_deps()
@@ -422,8 +672,12 @@ def main() -> None:
         mx.array(features_rest, dtype=mx.float32),
         mx.array(opacity_logits, dtype=mx.float32),
     )
+    initial_parameter_stats = model_parameter_stats(model)
     targets = [mx.array(camera.target[None, ...], dtype=mx.float32) for camera in cameras]
     grid_ids = select_grid_ids(len(cameras), args.grid_tiles)
+    diagnostic_camera = cameras[grid_ids[0]]
+    back_camera, side_camera = diagnostic_camera_arrays(dataset, diagnostic_camera, args.width, args.height)
+    id_colors = mx.array(gaussian_index_colors(args.num_gaussians), dtype=mx.float32)
 
     def loss_fn(
         means_: mx.array,
@@ -482,6 +736,19 @@ def main() -> None:
         model,
         cameras,
         grid_ids,
+        args.width,
+        args.height,
+        args.tile_size,
+        initial_active_sh_degree,
+        background_color,
+    )
+    save_diagnostic_views(
+        args.out_dir / "diagnostic_step_0000.png",
+        model,
+        diagnostic_camera,
+        back_camera,
+        side_camera,
+        id_colors,
         args.width,
         args.height,
         args.tile_size,
@@ -558,6 +825,19 @@ def main() -> None:
                 active_sh_degree,
                 background_color,
             )
+            save_diagnostic_views(
+                args.out_dir / f"diagnostic_step_{step:04d}.png",
+                model,
+                diagnostic_camera,
+                back_camera,
+                side_camera,
+                id_colors,
+                args.width,
+                args.height,
+                args.tile_size,
+                active_sh_degree,
+                background_color,
+            )
 
     final_mean_loss = evaluate_loss(active_sh_degree)
     if last_loss is None or not np.isfinite(final_mean_loss):
@@ -593,6 +873,9 @@ def main() -> None:
         },
         "initial_mean_loss": initial_mean_loss,
         "final_mean_loss": final_mean_loss,
+        "initial_parameter_stats": initial_parameter_stats,
+        "final_parameter_stats": model_parameter_stats(model),
+        "diagnostic_outputs": "diagnostic_step_*.png columns: target, front, back, side, id-color",
         "spz_convention": {
             "position": "scanner",
             "scale": "direct",
