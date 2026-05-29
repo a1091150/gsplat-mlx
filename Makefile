@@ -35,6 +35,20 @@ SCANNER_TRAIN_FRAMES ?= 3
 SCANNER_TRAIN_FRAME_STEP ?= 1
 SCANNER_TRAIN_STEPS ?= 2000
 
+FIXED_POINTS_DATASET_OUT ?= outputs/fixed_points_dataset
+FIXED_POINTS_TRAIN_OUT ?= outputs/fixed_points_train
+FIXED_POINTS_WIDTH ?= 512
+FIXED_POINTS_HEIGHT ?= 512
+FIXED_POINTS_CAMERAS ?= 48
+FIXED_POINTS_GAUSSIANS ?= 4096
+FIXED_POINTS_STEPS ?= 8000
+FIXED_POINTS_GRID_INTERVAL ?= 200
+FIXED_POINTS_GRID_TILES ?= 16
+FIXED_POINTS_SEED ?= 84
+FIXED_POINTS_SH_DEGREE_START ?= 0
+FIXED_POINTS_SH_DEGREE_TARGET ?= 3
+FIXED_POINTS_SH_DEGREE_SCHEDULE_INTERVAL ?= 1000
+
 SPZ_VARIANTS_OUT ?= outputs/spz_variants
 SPZ_VARIANTS_PREFIX ?= scanner_points
 SPZ_VARIANTS_POSITION_MODES ?= scanner
@@ -233,7 +247,7 @@ ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-fixed-points-dataset codex-fixed-points-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -249,6 +263,8 @@ help:
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
+	@printf "  make codex-fixed-points-dataset  Generate synthetic dodecahedron fixed-point dataset.\n"
+	@printf "  make codex-fixed-points-train  Train fixed power-of-two Gaussians on the synthetic dodecahedron dataset.\n"
 	@printf "  make codex-spz-variants  Export SPZ convention variants from a saved model parameter NPZ.\n"
 	@printf "  make codex-scanner-points-align  Render points.ply with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
@@ -362,6 +378,39 @@ codex-scanner-random-train:
 		--max-frames $(SCANNER_TRAIN_FRAMES) \
 		--frame-step $(SCANNER_TRAIN_FRAME_STEP) \
 		--steps $(SCANNER_TRAIN_STEPS)
+
+codex-fixed-points-dataset:
+	conda run -n $(CONDA_ENV) python scripts/test/train_fixed_points_3dgs_mlx.py \
+		--dataset-out "$(FIXED_POINTS_DATASET_OUT)" \
+		--out-dir "$(FIXED_POINTS_TRAIN_OUT)" \
+		--width $(FIXED_POINTS_WIDTH) \
+		--height $(FIXED_POINTS_HEIGHT) \
+		--num-cameras $(FIXED_POINTS_CAMERAS) \
+		--num-gaussians $(FIXED_POINTS_GAUSSIANS) \
+		--steps $(FIXED_POINTS_STEPS) \
+		--grid-interval $(FIXED_POINTS_GRID_INTERVAL) \
+		--grid-tiles $(FIXED_POINTS_GRID_TILES) \
+		--sh-degree-start $(FIXED_POINTS_SH_DEGREE_START) \
+		--sh-degree-target $(FIXED_POINTS_SH_DEGREE_TARGET) \
+		--sh-degree-schedule-interval $(FIXED_POINTS_SH_DEGREE_SCHEDULE_INTERVAL) \
+		--seed $(FIXED_POINTS_SEED) \
+		--dataset-only
+
+codex-fixed-points-train:
+	conda run -n $(CONDA_ENV) python scripts/test/train_fixed_points_3dgs_mlx.py \
+		--dataset-out "$(FIXED_POINTS_DATASET_OUT)" \
+		--out-dir "$(FIXED_POINTS_TRAIN_OUT)" \
+		--width $(FIXED_POINTS_WIDTH) \
+		--height $(FIXED_POINTS_HEIGHT) \
+		--num-cameras $(FIXED_POINTS_CAMERAS) \
+		--num-gaussians $(FIXED_POINTS_GAUSSIANS) \
+		--steps $(FIXED_POINTS_STEPS) \
+		--grid-interval $(FIXED_POINTS_GRID_INTERVAL) \
+		--grid-tiles $(FIXED_POINTS_GRID_TILES) \
+		--sh-degree-start $(FIXED_POINTS_SH_DEGREE_START) \
+		--sh-degree-target $(FIXED_POINTS_SH_DEGREE_TARGET) \
+		--sh-degree-schedule-interval $(FIXED_POINTS_SH_DEGREE_SCHEDULE_INTERVAL) \
+		--seed $(FIXED_POINTS_SEED)
 
 codex-spz-variants:
 	conda run -n $(CONDA_ENV) python scripts/test/export_spz_variants_from_model_npz.py \
