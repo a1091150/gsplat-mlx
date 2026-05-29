@@ -163,6 +163,28 @@ SCANNER_POINTS_REFINE_SCENE_SCALE ?= 1.0
 SCANNER_POINTS_REFINE_SCENE_SCALE_MODE ?= points_extent
 SCANNER_POINTS_REFINE_ABSGRAD ?= 0
 SCANNER_POINTS_REFINE_REVISED_OPACITY ?= 0
+
+COLMAP_360_ROOT ?= submodules/gsplat/examples/datasets/data/360_v2
+COLMAP_360_SCENE ?= garden
+COLMAP_360_DATA ?= $(COLMAP_360_ROOT)/$(COLMAP_360_SCENE)
+COLMAP_360_FACTOR ?= $(if $(filter bonsai counter kitchen room,$(COLMAP_360_SCENE)),2,4)
+COLMAP_360_TEST_EVERY ?= 8
+COLMAP_360_WIDTH ?= 0
+COLMAP_360_HEIGHT ?= 0
+COLMAP_360_MAX_FRAMES ?= 0
+COLMAP_360_FRAME_STEP ?= 1
+COLMAP_360_START_INDEX ?= 0
+COLMAP_360_EVAL_FRAMES ?= 0
+COLMAP_360_EVAL_FRAME_STEP ?= $(COLMAP_360_FRAME_STEP)
+COLMAP_360_EVAL_START_INDEX ?= 0
+COLMAP_360_MAX_POINTS ?= 0
+COLMAP_360_STEPS ?= 30000
+COLMAP_360_BATCH_SIZE ?= 1
+COLMAP_360_OUT ?= outputs/360_$(COLMAP_360_SCENE)_train
+COLMAP_360_SPZ ?= $(COLMAP_360_OUT)/trained_360_$(COLMAP_360_SCENE).spz
+COLMAP_360_MODEL_NPZ ?= $(COLMAP_360_OUT)/trained_model_params.npz
+COLMAP_360_LOG_INTERVAL ?= 100
+COLMAP_360_MLX_CACHE_LIMIT_GB ?= 32
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
 IMAGE_FITTING_IMAGE_FLAGS =
@@ -274,7 +296,7 @@ ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-image-fitting-train codex-scanner-dataset-smoke codex-scanner-random-train codex-fixed-points-dataset codex-fixed-points-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-image-fitting-train codex-scanner-dataset-smoke codex-scanner-random-train codex-fixed-points-dataset codex-fixed-points-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-360-points-train-spz codex-360-points-train-spz-refine codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -298,6 +320,8 @@ help:
 	@printf "  make codex-scanner-points-spz  Export scanner points.ply to SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz  Train points.ply Gaussians and export SPZ.\n"
 	@printf "  make codex-scanner-points-train-spz-refine  Train points.ply Gaussians with refine/densify enabled and export SPZ.\n"
+	@printf "  make codex-360-points-train-spz  Train a Mip-NeRF 360/COLMAP scene with gsplat default-style settings and export SPZ.\n"
+	@printf "  make codex-360-points-train-spz-refine  Alias for the gsplat-default 360 refine/densify training target.\n"
 	@printf "    Optional: SCANNER_POINTS_EVAL_FRAMES/FRAME_STEP/START_INDEX enable held-out eval compares.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_SH_DEGREE_START/TARGET/SCHEDULE_INTERVAL configure progressive SH degree.\n"
 	@printf "    Optional: SCANNER_POINTS_TRAIN_BATCH_SIZE/FRAME_SAMPLING/FRAME_SHUFFLE_SEED configure frame sampling.\n"
@@ -533,6 +557,11 @@ codex-scanner-points-train-spz-refine: SCANNER_POINTS_TRAIN_SPZ = outputs/scanne
 codex-scanner-points-train-spz-refine: SCANNER_POINTS_TRAIN_MODEL_NPZ = outputs/scanner_points_multiview_train_refine/trained_model_params.npz
 codex-scanner-points-train-spz-refine: SCANNER_POINTS_REFINE_FLAGS = --refine-enabled --refine-prune-opa $(SCANNER_POINTS_REFINE_PRUNE_OPA) --refine-grow-grad2d $(SCANNER_POINTS_REFINE_GROW_GRAD2D) --refine-grow-scale3d $(SCANNER_POINTS_REFINE_GROW_SCALE3D) --refine-grow-scale2d $(SCANNER_POINTS_REFINE_GROW_SCALE2D) --refine-prune-scale3d $(SCANNER_POINTS_REFINE_PRUNE_SCALE3D) --refine-prune-scale2d $(SCANNER_POINTS_REFINE_PRUNE_SCALE2D) --refine-scale2d-stop-iter $(SCANNER_POINTS_REFINE_SCALE2D_STOP_ITER) --refine-start-iter $(SCANNER_POINTS_REFINE_START_ITER) --refine-stop-iter $(SCANNER_POINTS_REFINE_STOP_ITER) --refine-reset-every $(SCANNER_POINTS_REFINE_RESET_EVERY) --refine-every $(SCANNER_POINTS_REFINE_EVERY) --refine-pause-after-reset $(SCANNER_POINTS_REFINE_PAUSE_AFTER_RESET) --refine-scene-scale $(SCANNER_POINTS_REFINE_SCENE_SCALE) --refine-revised-opacity
 codex-scanner-points-train-spz-refine: codex-scanner-points-train-spz
+
+codex-360-points-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_360_points_multiview_3dgs_mlx.py --data "$(COLMAP_360_DATA)" --out-dir "$(COLMAP_360_OUT)" --out-spz "$(COLMAP_360_SPZ)" --out-model-npz "$(COLMAP_360_MODEL_NPZ)" --data-factor $(COLMAP_360_FACTOR) --test-every $(COLMAP_360_TEST_EVERY) --width $(COLMAP_360_WIDTH) --height $(COLMAP_360_HEIGHT) --max-frames $(COLMAP_360_MAX_FRAMES) --frame-step $(COLMAP_360_FRAME_STEP) --start-index $(COLMAP_360_START_INDEX) --eval-max-frames $(COLMAP_360_EVAL_FRAMES) --eval-frame-step $(COLMAP_360_EVAL_FRAME_STEP) --eval-start-index $(COLMAP_360_EVAL_START_INDEX) --max-points $(COLMAP_360_MAX_POINTS) --steps $(COLMAP_360_STEPS) --batch-size $(COLMAP_360_BATCH_SIZE) --log-interval $(COLMAP_360_LOG_INTERVAL) --mlx-cache-limit-gb $(COLMAP_360_MLX_CACHE_LIMIT_GB) --refine-enabled
+
+codex-360-points-train-spz-refine: codex-360-points-train-spz
 
 codex-projection-guardrails:
 	conda run -n $(CONDA_ENV) python scripts/test/training_viewspace_proxy_smoke.py
