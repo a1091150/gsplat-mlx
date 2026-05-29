@@ -288,3 +288,4 @@ submodules/*
 build/
 build-*/
 outputs/*
+datasets/*
