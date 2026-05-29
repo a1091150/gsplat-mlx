@@ -144,6 +144,24 @@ def side_camera_arrays(width: int, height: int, xy_extent: float, z_extent: floa
     return mx.array(viewmat[None, None, ...], dtype=mx.float32), mx.array(K[None, None, ...], dtype=mx.float32)
 
 
+def back_camera_arrays(width: int, height: int, camera_z: float) -> tuple[mx.array, mx.array]:
+    viewmat = np.array(
+        [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, float(camera_z)],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    focal = 0.5 * float(min(width, height))
+    K = np.array(
+        [[focal, 0.0, width * 0.5], [0.0, focal, height * 0.5], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    return mx.array(viewmat[None, None, ...], dtype=mx.float32), mx.array(K[None, None, ...], dtype=mx.float32)
+
+
 def render_model(
     model: ImageFitting3DGSModel,
     viewspace_points: mx.array,
@@ -229,19 +247,21 @@ def gaussian_index_colors(num_gaussians: int) -> np.ndarray:
     return colors.reshape(1, 1, num_gaussians, 3).astype(np.float32)
 
 
-def save_render_quad(
+def save_render_views(
     path: Path,
     target: np.ndarray,
-    render: mx.array,
+    front_render: mx.array,
+    back_render: mx.array,
     side_render: mx.array,
     id_render: mx.array,
 ) -> None:
-    mx.eval(render, side_render, id_render)
-    rendered = np.asarray(render[0], dtype=np.float32)
+    mx.eval(front_render, back_render, side_render, id_render)
+    front = np.asarray(front_render[0], dtype=np.float32)
+    back = np.asarray(back_render[0], dtype=np.float32)
     side = np.asarray(side_render[0], dtype=np.float32)
     id_rendered = np.asarray(id_render[0], dtype=np.float32)
-    quad = np.concatenate([target, rendered, side, id_rendered], axis=1)
-    write_png(path, image_to_u8(quad))
+    views = np.concatenate([target, front, back, side, id_rendered], axis=1)
+    write_png(path, image_to_u8(views))
 
 
 def save_model_npz(path: Path, model: ImageFitting3DGSModel, summary: dict) -> None:
@@ -268,13 +288,17 @@ def spz_camera_markers(camera_z: float, xy_extent: float) -> dict:
             [
                 [0.0, 0.0, -float(camera_z) - 1.0],
                 [side_distance + 1.0, 0.0, 0.0],
+                [0.0, 0.0, float(camera_z)],
             ],
             dtype=np.float32,
         ),
-        "log_scales": np.full((2, 3), np.log(marker_scale), dtype=np.float32),
-        "quats_wxyz": np.array([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
-        "opacity_logits": np.full((2,), logit(np.array([marker_opacity], dtype=np.float32))[0], dtype=np.float32),
-        "rgb": np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
+        "log_scales": np.full((3, 3), np.log(marker_scale), dtype=np.float32),
+        "quats_wxyz": np.array(
+            [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+            dtype=np.float32,
+        ),
+        "opacity_logits": np.full((3,), logit(np.array([marker_opacity], dtype=np.float32))[0], dtype=np.float32),
+        "rgb": np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.25, 1.0]], dtype=np.float32),
         "metadata": [
             {
                 "name": "front_camera_back_marker",
@@ -287,6 +311,12 @@ def spz_camera_markers(camera_z: float, xy_extent: float) -> dict:
                 "color": "green",
                 "position": [side_distance + 1.0, 0.0, 0.0],
                 "hidden_from": "right_side_camera",
+            },
+            {
+                "name": "back_camera_marker",
+                "color": "blue",
+                "position": [0.0, 0.0, float(camera_z)],
+                "hidden_from": "back_camera_origin",
             },
         ],
     }
@@ -385,7 +415,17 @@ def main() -> None:
         float(dataset.metadata["init_xy_extent"]),
         float(dataset.metadata["init_z_extent"]),
     )
+    back_viewmats, back_Ks = back_camera_arrays(args.width, args.height, args.camera_z)
+    front_target_np = camera.target.astype(np.float32)
+    back_target_np = np.flip(front_target_np, axis=1).copy()
+    back_target_path = args.out_dir / "back_target.png"
+    # write_png(back_target_path, image_to_u8(back_target_np))
     target = mx.array(camera.target[None, ...], dtype=mx.float32)
+    back_target = mx.array(back_target_np[None, ...], dtype=mx.float32)
+    training_views = [
+        ("front", viewmats, Ks, target),
+        ("back", back_viewmats, back_Ks, back_target),
+    ]
     id_colors = mx.array(gaussian_index_colors(args.num_gaussians), dtype=mx.float32)
 
     def loss_fn(
@@ -395,20 +435,41 @@ def main() -> None:
         color_logits: mx.array,
         opacity_logits: mx.array,
         viewspace_points: mx.array,
+        viewmats_: mx.array,
+        Ks_: mx.array,
+        target_: mx.array,
     ) -> mx.array:
         local = ImageFitting3DGSModel.from_arrays(means, quats, log_scales, color_logits, opacity_logits)
         render = render_model(
             local,
             viewspace_points,
-            viewmats,
-            Ks,
+            viewmats_,
+            Ks_,
             args.width,
             args.height,
             args.tile_size,
             background_color,
         )
-        diff = render["render_colors"] - target
-        return mx.mean(diff * diff)
+        diff = render["render_colors"] - target_
+        return mx.mean(mx.abs(diff))
+
+    def evaluate_mean_loss() -> float:
+        losses = []
+        for _, eval_viewmats, eval_Ks, eval_target in training_views:
+            loss = loss_fn(
+                model.means,
+                model.quats,
+                model.log_scales,
+                model.color_logits,
+                model.opacity_logits,
+                mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+                eval_viewmats,
+                eval_Ks,
+                eval_target,
+            )
+            mx.eval(loss)
+            losses.append(float(np.asarray(loss)))
+        return float(np.mean(losses))
 
     initial_viewspace = mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32)
     initial_render = render_model(
@@ -445,13 +506,25 @@ def main() -> None:
         args.tile_size,
         background_color,
     )
-    save_render_quad(
+    initial_back_render = render_model(
+        model,
+        mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+        back_viewmats,
+        back_Ks,
+        args.width,
+        args.height,
+        args.tile_size,
+        background_color,
+    )
+    save_render_views(
         args.out_dir / "step_0000.png",
         camera.target,
         initial_render["render_colors"],
+        initial_back_render["render_colors"],
         initial_side_render["render_colors"],
         initial_id_render["render_colors"],
     )
+    initial_mean_loss = evaluate_mean_loss()
 
     grad_fn = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     optimizers = {
@@ -465,7 +538,10 @@ def main() -> None:
     first_loss = None
     last_loss = None
     last_viewspace_grad = None
+    view_loss_sums = {name: 0.0 for name, _, _, _ in training_views}
+    view_loss_counts = {name: 0 for name, _, _, _ in training_views}
     for step in range(1, args.steps + 1):
+        view_name, train_viewmats, train_Ks, train_target = training_views[(step - 1) % len(training_views)]
         viewspace_points = mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32)
         loss, grads = grad_fn(
             model.means,
@@ -474,6 +550,9 @@ def main() -> None:
             model.color_logits,
             model.opacity_logits,
             viewspace_points,
+            train_viewmats,
+            train_Ks,
+            train_target,
         )
         d_means, d_quats, d_log_scales, d_color_logits, d_opacity_logits, d_viewspace = grads
         mx.eval(loss, d_viewspace)
@@ -482,6 +561,8 @@ def main() -> None:
             first_loss = curr_loss
         last_loss = curr_loss
         last_viewspace_grad = d_viewspace
+        view_loss_sums[view_name] += curr_loss
+        view_loss_counts[view_name] += 1
 
         optimizers["means"].update(model, {"means": d_means})
         optimizers["quats"].update(model, {"quats": d_quats})
@@ -492,7 +573,7 @@ def main() -> None:
         mx.eval(model.means, model.quats, model.log_scales, model.color_logits, model.opacity_logits)
 
         if step == 1 or step == args.steps or (args.log_interval > 0 and step % args.log_interval == 0):
-            print(f"step={step:04d} loss={curr_loss:.8f}")
+            print(f"step={step:04d} view={view_name} loss={curr_loss:.8f}")
         if step == args.steps or (args.save_interval > 0 and step % args.save_interval == 0):
             render = render_model(
                 model,
@@ -525,19 +606,31 @@ def main() -> None:
                 args.tile_size,
                 background_color,
             )
-            save_render_quad(
+            back_render = render_model(
+                model,
+                mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+                back_viewmats,
+                back_Ks,
+                args.width,
+                args.height,
+                args.tile_size,
+                background_color,
+            )
+            save_render_views(
                 args.out_dir / f"step_{step:04d}.png",
                 camera.target,
                 render["render_colors"],
+                back_render["render_colors"],
                 side_render["render_colors"],
                 id_render["render_colors"],
             )
 
-    if first_loss is None or last_loss is None or not np.isfinite(last_loss):
+    final_mean_loss = evaluate_mean_loss()
+    if first_loss is None or last_loss is None or not np.isfinite(final_mean_loss):
         raise AssertionError("image-fitting training loss should be finite")
-    if last_loss > first_loss * 1.05:
+    if final_mean_loss > initial_mean_loss * 1.05:
         raise AssertionError(
-            f"image-fitting training loss should not diverge: initial={first_loss:.8f} final={last_loss:.8f}"
+            f"image-fitting training loss should not diverge: initial_mean={initial_mean_loss:.8f} final_mean={final_mean_loss:.8f}"
         )
     if last_viewspace_grad is None or not np.any(np.abs(np.asarray(last_viewspace_grad)) > 1.0e-8):
         raise AssertionError("image-fitting training expected nonzero viewspace_points gradient")
@@ -569,9 +662,17 @@ def main() -> None:
         "height": args.height,
         "steps": args.steps,
         "gaussians": args.num_gaussians,
-        "loss_function": "mse",
+        "loss_function": "l1",
+        "training_views": [name for name, _, _, _ in training_views],
+        "back_target": str(back_target_path),
         "initial_loss": first_loss,
-        "final_loss": last_loss,
+        "last_step_loss": last_loss,
+        "initial_mean_loss": initial_mean_loss,
+        "final_mean_loss": final_mean_loss,
+        "mean_step_loss_by_view": {
+            name: (view_loss_sums[name] / view_loss_counts[name] if view_loss_counts[name] > 0 else None)
+            for name in view_loss_sums
+        },
         "visible_gaussians": visible,
         "model_npz": str(args.out_dir / "trained_model_params.npz"),
         "spz": str(spz_path),
@@ -589,7 +690,7 @@ def main() -> None:
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(
         "image-fitting 3dgs mlx training ok "
-        f"initial_loss={first_loss:.8f} final_loss={last_loss:.8f} "
+        f"initial_mean_loss={initial_mean_loss:.8f} final_mean_loss={final_mean_loss:.8f} "
         f"visible_gaussians={visible} spz={spz_path} output_dir={args.out_dir}"
     )
 
