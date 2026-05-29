@@ -20,6 +20,22 @@ TINY_MULTIVIEW_WIDTH ?= 512
 TINY_MULTIVIEW_HEIGHT ?= 512
 TINY_MULTIVIEW_VIEWS ?= 3
 
+IMAGE_FITTING_IMG_PATH ?=
+IMAGE_FITTING_DATASET_OUT ?= outputs/image_fitting_dataset
+IMAGE_FITTING_TRAIN_OUT ?= outputs/image_fitting_train
+IMAGE_FITTING_SPZ_OUT ?= outputs/image_fitting_train/trained_image_fitting.spz
+IMAGE_FITTING_STEPS ?= 1000
+IMAGE_FITTING_N ?= 1024
+IMAGE_FITTING_WIDTH ?= 256
+IMAGE_FITTING_HEIGHT ?= 256
+IMAGE_FITTING_SEED ?= 11
+IMAGE_FITTING_CAMERA_Z ?= 8.0
+IMAGE_FITTING_INIT_XY_EXTENT ?= 8.0
+IMAGE_FITTING_INIT_Z_EXTENT ?= 0.25
+IMAGE_FITTING_INIT_SCALE ?= 0.02
+IMAGE_FITTING_LOG_INTERVAL ?= 50
+IMAGE_FITTING_SAVE_INTERVAL ?= 100
+
 SCANNER_DATASET ?= /Users/yangdunfu/Downloads/2026_05_04_16_51_29
 SCANNER_SMOKE_OUT ?= outputs/scanner_dataset_random_render
 SCANNER_SMOKE_WIDTH ?= 512
@@ -149,6 +165,11 @@ SCANNER_POINTS_REFINE_ABSGRAD ?= 0
 SCANNER_POINTS_REFINE_REVISED_OPACITY ?= 0
 CONDA_BASE := $(shell conda info --base 2>/dev/null)
 
+IMAGE_FITTING_IMAGE_FLAGS =
+ifneq ($(strip $(IMAGE_FITTING_IMG_PATH)),)
+IMAGE_FITTING_IMAGE_FLAGS += --img-path "$(IMAGE_FITTING_IMG_PATH)"
+endif
+
 SCANNER_POINTS_SH_SCHEDULE_FLAGS = --sh-degree-schedule-interval $(SCANNER_POINTS_TRAIN_SH_DEGREE_SCHEDULE_INTERVAL)
 ifneq ($(strip $(SCANNER_POINTS_TRAIN_SH_DEGREE_START)),)
 SCANNER_POINTS_SH_SCHEDULE_FLAGS += --sh-degree-start $(SCANNER_POINTS_TRAIN_SH_DEGREE_START)
@@ -253,7 +274,7 @@ ifeq ($(SCANNER_POINTS_REFINE_REVISED_OPACITY),1)
 SCANNER_POINTS_REFINE_FLAGS += --refine-revised-opacity
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-scanner-dataset-smoke codex-scanner-random-train codex-fixed-points-dataset codex-fixed-points-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-tiny-train codex-tiny-multiview-train codex-image-fitting-train codex-scanner-dataset-smoke codex-scanner-random-train codex-fixed-points-dataset codex-fixed-points-train codex-spz-variants codex-scanner-points-align codex-scanner-points-spz codex-scanner-points-train-spz codex-scanner-points-train-spz-refine codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -267,6 +288,7 @@ help:
 	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-tiny-train  Run a tiny MLX nn.Module+Adam 3DGS training example.\n"
 	@printf "  make codex-tiny-multiview-train  Run a tiny multi-view MLX 3DGS training example.\n"
+	@printf "  make codex-image-fitting-train  Train MLX 3DGS against one image or the synthetic image-fitting target.\n"
 	@printf "  make codex-scanner-dataset-smoke  Render random Gaussians with scanner dataset cameras.\n"
 	@printf "  make codex-scanner-random-train  Train random Gaussians against scanner dataset frames.\n"
 	@printf "  make codex-fixed-points-dataset  Generate synthetic dodecahedron fixed-point dataset.\n"
@@ -363,6 +385,24 @@ codex-tiny-multiview-train:
 		--num-views $(TINY_MULTIVIEW_VIEWS) \
 		--width $(TINY_MULTIVIEW_WIDTH) \
 		--height $(TINY_MULTIVIEW_HEIGHT)
+
+codex-image-fitting-train:
+	conda run -n $(CONDA_ENV) python scripts/test/train_image_fitting_3dgs_mlx.py \
+		$(IMAGE_FITTING_IMAGE_FLAGS) \
+		--dataset-out "$(IMAGE_FITTING_DATASET_OUT)" \
+		--out-dir "$(IMAGE_FITTING_TRAIN_OUT)" \
+		--spz-out "$(IMAGE_FITTING_SPZ_OUT)" \
+		--steps $(IMAGE_FITTING_STEPS) \
+		--num-gaussians $(IMAGE_FITTING_N) \
+		--width $(IMAGE_FITTING_WIDTH) \
+		--height $(IMAGE_FITTING_HEIGHT) \
+		--seed $(IMAGE_FITTING_SEED) \
+		--camera-z $(IMAGE_FITTING_CAMERA_Z) \
+		--init-xy-extent $(IMAGE_FITTING_INIT_XY_EXTENT) \
+		--init-z-extent $(IMAGE_FITTING_INIT_Z_EXTENT) \
+		--init-scale $(IMAGE_FITTING_INIT_SCALE) \
+		--log-interval $(IMAGE_FITTING_LOG_INTERVAL) \
+		--save-interval $(IMAGE_FITTING_SAVE_INTERVAL)
 
 codex-scanner-dataset-smoke:
 	conda run -n $(CONDA_ENV) python scripts/test/scanner_dataset_random_render_smoke.py \
