@@ -16,6 +16,7 @@ class TrainingCamera:
     K: np.ndarray
     position: np.ndarray
     target: np.ndarray
+    alpha_mask: np.ndarray | None = None
 
 
 @dataclass

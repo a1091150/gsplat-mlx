@@ -121,6 +121,7 @@ def load_b075x65r3x_dataset(
                 K=K.astype(np.float32),
                 position=camera_position_from_viewmat(viewmat),
                 target=target.astype(np.float32),
+                alpha_mask=alpha.astype(np.float32),
             )
         )
 
