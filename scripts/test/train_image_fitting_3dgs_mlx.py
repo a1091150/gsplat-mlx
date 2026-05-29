@@ -125,6 +125,25 @@ def camera_arrays(camera: TrainingCamera) -> tuple[mx.array, mx.array]:
     )
 
 
+def side_camera_arrays(width: int, height: int, xy_extent: float, z_extent: float) -> tuple[mx.array, mx.array]:
+    side_distance = (float(xy_extent) + 2.0) * 2.0
+    viewmat = np.array(
+        [
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, side_distance],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    focal = 0.5 * float(min(width, height))
+    K = np.array(
+        [[focal, 0.0, width * 0.5], [0.0, focal, height * 0.5], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    return mx.array(viewmat[None, None, ...], dtype=mx.float32), mx.array(K[None, None, ...], dtype=mx.float32)
+
+
 def render_model(
     model: ImageFitting3DGSModel,
     viewspace_points: mx.array,
@@ -134,6 +153,7 @@ def render_model(
     height: int,
     tile_size: int,
     background_color: np.ndarray,
+    colors_override: mx.array | None = None,
 ) -> dict[str, mx.array]:
     tile_width = (width + tile_size - 1) // tile_size
     tile_height = (height + tile_size - 1) // tile_size
@@ -181,7 +201,7 @@ def render_model(
         {
             "means2d": projection["means2d"],
             "conics": projection["conics"],
-            "colors": model.colors,
+            "colors": model.colors if colors_override is None else colors_override,
             "opacities": mx.expand_dims(model.opacities, axis=1),
             "backgrounds": mx.array(np.asarray(background_color, dtype=np.float32)[None, :], dtype=mx.float32),
             "tile_offsets": tile_offsets,
@@ -199,11 +219,29 @@ def render_model(
     }
 
 
-def save_render_pair(path: Path, target: np.ndarray, render: mx.array) -> None:
-    mx.eval(render)
+def gaussian_index_colors(num_gaussians: int) -> np.ndarray:
+    if num_gaussians <= 1:
+        return np.array([[[[1.0, 0.2, 0.1]]]], dtype=np.float32)
+    t = np.linspace(0.0, 1.0, num_gaussians, dtype=np.float32)
+    phases = np.stack([t, t + 1.0 / 3.0, t + 2.0 / 3.0], axis=-1)
+    colors = 0.5 + 0.5 * np.cos(2.0 * np.pi * phases)
+    colors = 0.12 + 0.88 * colors
+    return colors.reshape(1, 1, num_gaussians, 3).astype(np.float32)
+
+
+def save_render_quad(
+    path: Path,
+    target: np.ndarray,
+    render: mx.array,
+    side_render: mx.array,
+    id_render: mx.array,
+) -> None:
+    mx.eval(render, side_render, id_render)
     rendered = np.asarray(render[0], dtype=np.float32)
-    pair = np.concatenate([target, rendered], axis=1)
-    write_png(path, image_to_u8(pair))
+    side = np.asarray(side_render[0], dtype=np.float32)
+    id_rendered = np.asarray(id_render[0], dtype=np.float32)
+    quad = np.concatenate([target, rendered, side, id_rendered], axis=1)
+    write_png(path, image_to_u8(quad))
 
 
 def save_model_npz(path: Path, model: ImageFitting3DGSModel, summary: dict) -> None:
@@ -221,7 +259,40 @@ def save_model_npz(path: Path, model: ImageFitting3DGSModel, summary: dict) -> N
     )
 
 
-def export_spz(path: Path, model: ImageFitting3DGSModel) -> int:
+def spz_camera_markers(camera_z: float, xy_extent: float) -> dict:
+    side_distance = (float(xy_extent) + 2.0) * 2.0
+    marker_scale = 0.25
+    marker_opacity = 0.95
+    return {
+        "positions": np.array(
+            [
+                [0.0, 0.0, -float(camera_z) - 1.0],
+                [side_distance + 1.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        ),
+        "log_scales": np.full((2, 3), np.log(marker_scale), dtype=np.float32),
+        "quats_wxyz": np.array([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        "opacity_logits": np.full((2,), logit(np.array([marker_opacity], dtype=np.float32))[0], dtype=np.float32),
+        "rgb": np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
+        "metadata": [
+            {
+                "name": "front_camera_back_marker",
+                "color": "yellow",
+                "position": [0.0, 0.0, -float(camera_z) - 1.0],
+                "hidden_from": "front_training_camera",
+            },
+            {
+                "name": "right_side_camera_back_marker",
+                "color": "green",
+                "position": [side_distance + 1.0, 0.0, 0.0],
+                "hidden_from": "right_side_camera",
+            },
+        ],
+    }
+
+
+def export_spz(path: Path, model: ImageFitting3DGSModel, camera_z: float, xy_extent: float) -> tuple[int, list[dict]]:
     try:
         import spz
     except ImportError as exc:
@@ -233,6 +304,13 @@ def export_spz(path: Path, model: ImageFitting3DGSModel) -> int:
     quats_wxyz = np.asarray(model.normalized_quats[0], dtype=np.float32)
     colors = np.asarray(model.colors[0, 0], dtype=np.float32)
     opacity_logits = np.asarray(model.opacity_logits[0], dtype=np.float32)
+    markers = spz_camera_markers(camera_z, xy_extent)
+
+    means = np.concatenate([means, markers["positions"]], axis=0).astype(np.float32)
+    log_scales = np.concatenate([log_scales, markers["log_scales"]], axis=0).astype(np.float32)
+    quats_wxyz = np.concatenate([quats_wxyz, markers["quats_wxyz"]], axis=0).astype(np.float32)
+    colors = np.concatenate([colors, markers["rgb"]], axis=0).astype(np.float32)
+    opacity_logits = np.concatenate([opacity_logits, markers["opacity_logits"]], axis=0).astype(np.float32)
 
     cloud = spz.GaussianCloud()
     cloud.antialiased = True
@@ -247,7 +325,7 @@ def export_spz(path: Path, model: ImageFitting3DGSModel) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not spz.save_spz(cloud, spz.PackOptions(), str(path)):
         raise RuntimeError(f"failed to save spz to {path}")
-    return int(means.shape[0])
+    return int(means.shape[0]), markers["metadata"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -301,7 +379,14 @@ def main() -> None:
     background_color = np.zeros((3,), dtype=np.float32) if dataset.background_color is None else dataset.background_color
     model = ImageFitting3DGSModel(args.seed, args.num_gaussians, dataset.bbox_min, dataset.bbox_max, args.init_scale)
     viewmats, Ks = camera_arrays(camera)
+    side_viewmats, side_Ks = side_camera_arrays(
+        args.width,
+        args.height,
+        float(dataset.metadata["init_xy_extent"]),
+        float(dataset.metadata["init_z_extent"]),
+    )
     target = mx.array(camera.target[None, ...], dtype=mx.float32)
+    id_colors = mx.array(gaussian_index_colors(args.num_gaussians), dtype=mx.float32)
 
     def loss_fn(
         means: mx.array,
@@ -339,7 +424,34 @@ def main() -> None:
     mx.eval(initial_render["render_colors"], initial_render["tiles_per_gauss"])
     if int(np.sum(np.asarray(initial_render["tiles_per_gauss"]))) <= 0:
         raise AssertionError("image-fitting training expected nonzero tile intersections")
-    save_render_pair(args.out_dir / "step_0000.png", camera.target, initial_render["render_colors"])
+    initial_id_render = render_model(
+        model,
+        mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+        viewmats,
+        Ks,
+        args.width,
+        args.height,
+        args.tile_size,
+        background_color,
+        colors_override=id_colors,
+    )
+    initial_side_render = render_model(
+        model,
+        mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+        side_viewmats,
+        side_Ks,
+        args.width,
+        args.height,
+        args.tile_size,
+        background_color,
+    )
+    save_render_quad(
+        args.out_dir / "step_0000.png",
+        camera.target,
+        initial_render["render_colors"],
+        initial_side_render["render_colors"],
+        initial_id_render["render_colors"],
+    )
 
     grad_fn = mx.value_and_grad(loss_fn, argnums=(0, 1, 2, 3, 4, 5))
     optimizers = {
@@ -392,7 +504,34 @@ def main() -> None:
                 args.tile_size,
                 background_color,
             )
-            save_render_pair(args.out_dir / f"step_{step:04d}.png", camera.target, render["render_colors"])
+            id_render = render_model(
+                model,
+                mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+                viewmats,
+                Ks,
+                args.width,
+                args.height,
+                args.tile_size,
+                background_color,
+                colors_override=id_colors,
+            )
+            side_render = render_model(
+                model,
+                mx.zeros((1, 1, args.num_gaussians, 2), dtype=mx.float32),
+                side_viewmats,
+                side_Ks,
+                args.width,
+                args.height,
+                args.tile_size,
+                background_color,
+            )
+            save_render_quad(
+                args.out_dir / f"step_{step:04d}.png",
+                camera.target,
+                render["render_colors"],
+                side_render["render_colors"],
+                id_render["render_colors"],
+            )
 
     if first_loss is None or last_loss is None or not np.isfinite(last_loss):
         raise AssertionError("image-fitting training loss should be finite")
@@ -416,7 +555,12 @@ def main() -> None:
     mx.eval(final_render["radii"])
     visible = int(np.count_nonzero(np.any(np.asarray(final_render["radii"]) > 0, axis=-1)))
     spz_path = args.spz_out if args.spz_out is not None else args.out_dir / "trained_image_fitting.spz"
-    exported_points = export_spz(spz_path, model)
+    exported_points, spz_markers = export_spz(
+        spz_path,
+        model,
+        args.camera_z,
+        float(dataset.metadata["init_xy_extent"]),
+    )
     summary = {
         "dataset": dataset.name,
         "dataset_metadata": dataset.metadata,
@@ -439,6 +583,7 @@ def main() -> None:
             "color": "sh_degree_0",
         },
         "spz_points": exported_points,
+        "spz_camera_markers": spz_markers,
     }
     save_model_npz(args.out_dir / "trained_model_params.npz", model, summary)
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
