@@ -173,6 +173,9 @@ implementation:
 conda run -n gsplat_core python scripts/test/compare_exported_npz.py
 ```
 
+See [scripts/export_ref/README.md](scripts/export_ref/README.md) for CUDA-side
+fixture export instructions.
+
 ## CUDA Reference Fixtures
 
 The `scripts/export_ref` directory contains scripts intended to run on a CUDA
@@ -188,6 +191,69 @@ python scripts/export_ref/export_forward_3dgs_chain.py \
 
 The Mac / MLX side then loads the same inputs, runs `gsplat_core`, and compares
 against the reference outputs.
+
+## Datasets
+
+Training scripts expect datasets under `datasets/` by default, except scanner
+captures where `SCANNER_DATASET` can point at an exported folder anywhere on
+disk.
+
+### Mip-NeRF 360 / COLMAP
+
+The 360 training target uses `datasets/360_v2/<scene>`. Use gsplat's
+[`download_dataset.py`](https://github.com/nerfstudio-project/gsplat/blob/main/examples/datasets/download_dataset.py)
+as the reference downloader; its default dataset downloads `360_v2.zip`.
+
+After downloading and extracting the archive, place the dataset at
+`datasets/360_v2`.
+
+The default Makefile scene is `garden`:
+
+```bash
+make codex-360-points-train-spz
+```
+
+Override the scene or root as needed:
+
+```bash
+make codex-360-points-train-spz \
+  COLMAP_360_ROOT=datasets/360_v2 \
+  COLMAP_360_SCENE=bonsai
+```
+
+### B075X65R3X(Brown Sofa)
+
+The `B075X65R3X` dataset is available from
+[hbb1/torch-splatting](https://github.com/hbb1/torch-splatting). Download
+`B075X65R3X.zip`, unzip it, and place the extracted folder at:
+
+```text
+datasets/B075X65R3X
+```
+
+Then run:
+
+```bash
+make codex-sofa-train-spz
+```
+
+### 3D Scanner App Captures
+
+Scanner training currently targets datasets exported from the
+[3D Scanner iPhone App](https://3dscannerapp.com/).
+
+1. Use an iPhone with LiDAR support.
+2. Install the 3D Scanner App.
+3. Capture in landscape orientation, with the front camera on the left side.
+4. Choose the Point Cloud option for scanning.
+5. Export using the "All Data" option and transfer it to your Mac with AirDrop.
+
+Run scanner training by pointing `SCANNER_DATASET` at the exported folder:
+
+```bash
+make codex-scanner-points-train-spz2 \
+  SCANNER_DATASET=/path/to/3d-scanner-app-export
+```
 
 ## Training Experiments
 
