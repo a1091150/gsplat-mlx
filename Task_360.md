@@ -227,7 +227,7 @@ make codex-360-points-train-spz \
 - Development-only reduced validation command verified directly through `conda run`:
 
 ```sh
-conda run -n fastgs_core python scripts/test/train_360_points_multiview_3dgs_mlx.py \
+conda run -n gsplat_core python scripts/test/train_360_points_multiview_3dgs_mlx.py \
   --data submodules/gsplat/examples/datasets/data/360_v2/garden \
   --data-factor 4 \
   --out-dir outputs/360_garden_refine_smoke \

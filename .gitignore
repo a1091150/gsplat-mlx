@@ -285,6 +285,9 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/swift,swiftpackagemanager,swiftpm,macos,windows,linux,xcode
 
 submodules/*
+!submodules/
+!submodules/spz
+!submodules/spz/
 build/
 build-*/
 outputs/*

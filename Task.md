@@ -6,7 +6,7 @@
 - Target package: `gsplat_core`.
 - Target direction: gsplat CUDA/PyTorch extension to MLX Metal extension.
 - Primary milestone: 3DGS forward low-level ops.
-- Conda environment: `fastgs_core`.
+- Conda environment: `gsplat_core`.
 
 ## Explicitly Out of Scope
 - 2DGS operators and rendering paths.
@@ -647,7 +647,7 @@
   - `make codex-xcode-test`
   - `make xcode-build`
   - `make pip-install`
-  - `conda run -n fastgs_core python scripts/test/compare_exported_npz.py`
+  - `conda run -n gsplat_core python scripts/test/compare_exported_npz.py`
 - Use direct CUDA/PyTorch parity scripts only on a CUDA machine.
 
 ## Open Design Questions
@@ -752,7 +752,7 @@
 - [x] Add `scripts/test/autograd_vjp_smoke.py` for `mx.value_and_grad(..., argnums=...)` smoke coverage.
 - [x] Validate C++/Xcode smoke with `make codex-xcode-test`.
 - [x] Validate installed Python extension with `make pip-install`.
-- [x] Validate Python autograd smoke with `conda run -n fastgs_core python scripts/test/autograd_vjp_smoke.py`.
+- [x] Validate Python autograd smoke with `conda run -n gsplat_core python scripts/test/autograd_vjp_smoke.py`.
 - [x] Confirm exported `.npz` parity remains green.
 
 ## Task 6.8 - Dense Training Smoke With `viewspace_points` Gradient Proxy
@@ -938,7 +938,7 @@
 - [ ] Keep SPZ export separate from Task 6.19 so camera/loss behavior and file
   format behavior can be debugged independently.
 - [ ] Detect whether the `spz` Python package is available in the
-  `fastgs_core` conda environment and report a clear skip/error if missing.
+  `gsplat_core` conda environment and report a clear skip/error if missing.
 - [ ] Export trained Gaussian attributes:
   means, log-scales or scales in the expected SPZ convention, normalized
   quaternions, sigmoid opacities, and color data.
@@ -1018,10 +1018,9 @@
 - [x] Add `scripts/test/scanner_points_alignment_render.py`.
 - [x] Add a scanner dataset alignment script that reads both scanner cameras
   and `points.ply`.
-- [x] Use `/Users/yangdunfu/Documents/GitHub/fastgs_core/scripts/train_scanner_fastgs2.py`
-  as a reference for `points.ply` parsing, axis transform, color loading, and
-  camera/image pairing, but do not assume its convention is automatically
-  correct for gsplat_core.
+- [x] Use `scripts/test/train_scanner_points_multiview_3dgs_mlx2.py` as the
+  current gsplat_core reference for `points.ply` parsing, axis transform, color
+  loading, and camera/image pairing.
 - [x] Convert `points.ply` positions and RGB colors into gsplat_core Gaussian
   parameters without training.
 - [x] Initialize simple render-only Gaussian attributes:
@@ -1047,7 +1046,7 @@
 - [x] Keep this separate from Task 6.24 so render alignment and file export can
   be debugged independently.
 - [x] Detect whether the `spz` Python package is available in the
-  `fastgs_core` conda environment.
+  `gsplat_core` conda environment.
 - [x] Export scanner-initialized Gaussian attributes from `points.ply`:
   positions, log-scales, identity quaternions, logit opacities, and colors.
 - [x] Document coordinate system assumptions, quaternion ordering, scale

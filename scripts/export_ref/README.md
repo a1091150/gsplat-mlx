@@ -47,13 +47,13 @@ After copying the exported fixtures into `refs/`, compare them on the Mac/MLX
 side with:
 
 ```bash
-conda run -n fastgs_core python scripts/test/compare_exported_npz.py
+conda run -n gsplat_core python scripts/test/compare_exported_npz.py
 ```
 
 Pass one or more paths to compare a subset:
 
 ```bash
-conda run -n fastgs_core python scripts/test/compare_exported_npz.py \
+conda run -n gsplat_core python scripts/test/compare_exported_npz.py \
   refs/forward_3dgs_chain.npz
 ```
 
@@ -70,7 +70,7 @@ comparisons. After a CUDA-side trainer writes
 training summary using:
 
 ```bash
-conda run -n fastgs_core python scripts/test/compare_training_summary.py \
+conda run -n gsplat_core python scripts/test/compare_training_summary.py \
   --mlx outputs/scanner_points_multiview_train/training_summary.json \
   --cuda refs/training_reference_summary_cuda.json
 ```

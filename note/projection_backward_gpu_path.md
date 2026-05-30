@@ -190,8 +190,8 @@ The full GPU projection backward path is ready when:
 ```text
 make codex-xcode-test
 make pip-install
-conda run -n fastgs_core python scripts/test/compare_exported_npz.py
-conda run -n fastgs_core python scripts/test/autograd_vjp_smoke.py
+conda run -n gsplat_core python scripts/test/compare_exported_npz.py
+conda run -n gsplat_core python scripts/test/autograd_vjp_smoke.py
 make codex-training-smoke
 ```
 

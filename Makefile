@@ -1,4 +1,4 @@
-CONDA_ENV ?= fastgs_core
+CONDA_ENV ?= gsplat_core
 XCODE_BUILD_DIR ?= build_xcode
 XCODE_DERIVED_DATA_DIR ?= /private/tmp/gsplat_core_xcode_derived
 CONFIG ?= Release
