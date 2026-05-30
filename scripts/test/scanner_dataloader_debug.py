@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from train_scanner_points_multiview_3dgs_mlx import FrameBatchSampler
+from scanner_points_training_utils import FrameBatchSampler
 
 
 @dataclass

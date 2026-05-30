@@ -19,7 +19,13 @@ from gsplat_core import (
     rasterize_to_pixels_3dgs_forward,
 )
 from render_random_3dgs_png import write_png
-from train_tiny_3dgs_mlx import image_to_u8, normalize_quats
+def image_to_u8(image: np.ndarray) -> np.ndarray:
+    return (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
+def normalize_quats(quats: mx.array) -> mx.array:
+    norm = mx.sqrt(mx.sum(quats * quats, axis=-1, keepdims=True))
+    return quats / mx.maximum(norm, 1.0e-8)
 
 
 @dataclass(frozen=True)

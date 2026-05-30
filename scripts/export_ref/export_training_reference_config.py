@@ -30,7 +30,7 @@ def reference_config(dataset: str) -> dict:
         "purpose": (
             "Fixed-seed CUDA gsplat training reference contract for comparing "
             "longer training behavior against scripts/test/"
-            "train_scanner_points_multiview_3dgs_mlx.py summaries."
+            "train_scanner_points_multiview_3dgs_mlx2.py summaries."
         ),
         "dataset": dataset,
         "seed": 37,

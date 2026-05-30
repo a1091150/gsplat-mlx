@@ -11,8 +11,7 @@ import numpy as np
 from mlx.optimizers import Adam
 
 from render_random_3dgs_png import write_png
-from scanner_dataset_random_render_smoke import collect_frames, load_camera, load_target
-from scanner_points_alignment_render import prepare_points
+from scanner_dataset_utils import collect_frames, load_camera, load_target
 from train_360_points_multiview_3dgs_mlx import (
     MAX_SUPPORTED_SH_DEGREE,
     evaluate_frames,
@@ -24,7 +23,7 @@ from train_360_points_multiview_3dgs_mlx import (
     mean_loss,
     validate_positive,
 )
-from train_scanner_points_multiview_3dgs_mlx import (
+from scanner_points_training_utils import (
     FrameBatchSampler,
     ScannerDefaultStrategyConfig,
     ScannerDefaultStrategyRuntime,
@@ -38,6 +37,7 @@ from train_scanner_points_multiview_3dgs_mlx import (
     make_lr_schedule,
     normalize_quats,
     opacity_diagnostics,
+    prepare_points,
     points_extent_diagnostics,
     render_sh_model,
     save_model_parameters_npz,

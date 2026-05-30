@@ -20,15 +20,7 @@ from gsplat_core import (
     spherical_harmonics_forward,
 )
 from render_random_3dgs_png import write_png
-from scanner_dataset_random_render_smoke import collect_frames, load_camera, load_target
-from scanner_points_alignment_render import prepare_points
-from train_scanner_random_3dgs_mlx import (
-    camera_arrays,
-    concat_compare,
-    mean_loss,
-    mx_logit,
-)
-from train_tiny_3dgs_mlx import Tiny3DGSModel, image_to_u8, normalize_quats, render_model
+from scanner_dataset_utils import axis_transform, collect_frames, load_camera, load_target
 
 
 SH_C0 = 0.28209479177387814
@@ -42,6 +34,181 @@ GAUSSIAN_AXES = {
     "features_dc": 1,
     "features_rest": 1,
 }
+
+
+def normalize_quats(quats: mx.array) -> mx.array:
+    norm = mx.sqrt(mx.sum(quats * quats, axis=-1, keepdims=True))
+    return quats / mx.maximum(norm, 1.0e-8)
+
+
+def mx_logit(values: mx.array) -> mx.array:
+    clipped = mx.minimum(mx.maximum(values, 1.0e-5), 1.0 - 1.0e-5)
+    return mx.log(clipped / (1.0 - clipped))
+
+
+def image_to_u8(image: np.ndarray) -> np.ndarray:
+    return (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
+def camera_arrays(camera) -> tuple[mx.array, mx.array]:
+    return (
+        mx.array(camera.viewmat[None, None, ...], dtype=mx.float32),
+        mx.array(camera.K[None, None, ...], dtype=mx.float32),
+    )
+
+
+def concat_compare(target: np.ndarray, initial: np.ndarray, final: np.ndarray) -> np.ndarray:
+    gap = np.ones((target.shape[0], 6, 3), dtype=np.float32)
+    return np.concatenate([target, gap, initial, gap, final], axis=1)
+
+
+def mean_loss(stats: list[dict]) -> float:
+    return float(np.mean([item["loss"] for item in stats])) if stats else 0.0
+
+
+class Tiny3DGSModel(nn.Module):
+    @classmethod
+    def from_arrays(
+        cls,
+        means: mx.array,
+        quats: mx.array,
+        log_scales: mx.array,
+        color_logits: mx.array,
+        opacity_logits: mx.array,
+    ) -> "Tiny3DGSModel":
+        model = cls.__new__(cls)
+        nn.Module.__init__(model)
+        model.means = means
+        model.quats = quats
+        model.log_scales = log_scales
+        model.color_logits = color_logits
+        model.opacity_logits = opacity_logits
+        return model
+
+    @property
+    def scales(self) -> mx.array:
+        return mx.exp(self.log_scales)
+
+    @property
+    def colors(self) -> mx.array:
+        return mx.sigmoid(self.color_logits)
+
+    @property
+    def opacities(self) -> mx.array:
+        return mx.sigmoid(self.opacity_logits)
+
+    @property
+    def normalized_quats(self) -> mx.array:
+        return normalize_quats(self.quats)
+
+
+def render_model(
+    model: Tiny3DGSModel,
+    viewspace_points: mx.array,
+    viewmats: mx.array,
+    Ks: mx.array,
+    width: int,
+    height: int,
+    tile_size: int,
+) -> dict[str, mx.array]:
+    tile_width = (width + tile_size - 1) // tile_size
+    tile_height = (height + tile_size - 1) // tile_size
+    projection = projection_ewa_3dgs_fused_forward(
+        {
+            "means": model.means,
+            "quats": model.normalized_quats,
+            "scales": model.scales,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "viewspace_points": viewspace_points,
+        },
+        image_width=width,
+        image_height=height,
+        eps2d=0.3,
+        near_plane=0.01,
+        far_plane=100.0,
+        radius_clip=0.0,
+        calc_compensations=False,
+        camera_model=0,
+    )
+    intersections = intersect_tile_forward(
+        {
+            "means2d": projection["means2d"],
+            "radii": projection["radii"],
+            "depths": projection["depths"],
+        },
+        I=1,
+        tile_size=tile_size,
+        tile_width=tile_width,
+        tile_height=tile_height,
+        sort=True,
+        segmented=False,
+    )
+    tile_offsets = mx.stop_gradient(
+        intersect_offset_forward(
+            intersections["isect_ids"],
+            I=1,
+            tile_width=tile_width,
+            tile_height=tile_height,
+        )
+    )
+    flatten_ids = mx.stop_gradient(intersections["flatten_ids"])
+    render = rasterize_to_pixels_3dgs_forward(
+        {
+            "means2d": projection["means2d"],
+            "conics": projection["conics"],
+            "colors": model.colors,
+            "opacities": mx.expand_dims(model.opacities, axis=1),
+            "backgrounds": mx.array([[0.025, 0.025, 0.025]], dtype=mx.float32),
+            "tile_offsets": tile_offsets,
+            "flatten_ids": flatten_ids,
+        },
+        image_width=width,
+        image_height=height,
+        tile_size=tile_size,
+    )
+    return {
+        **render,
+        "radii": projection["radii"],
+        "tiles_per_gauss": mx.stop_gradient(intersections["tiles_per_gauss"]),
+        "flatten_ids": flatten_ids,
+    }
+
+
+def load_ply_positions_colors(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        from plyfile import PlyData
+    except ImportError as exc:
+        raise ImportError("Reading points.ply requires the 'plyfile' package.") from exc
+
+    ply = PlyData.read(str(path))
+    vertices = ply["vertex"]
+    points = np.stack([vertices["x"], vertices["y"], vertices["z"]], axis=1).astype(np.float32)
+    names = vertices.data.dtype.names or ()
+    if {"red", "green", "blue"}.issubset(names):
+        colors = np.stack([vertices["red"], vertices["green"], vertices["blue"]], axis=1).astype(np.float32)
+        if colors.max(initial=0.0) > 1.0:
+            colors /= 255.0
+        colors = np.clip(colors, 0.0, 1.0)
+    else:
+        colors = np.full_like(points, 0.7, dtype=np.float32)
+    return points, colors
+
+
+def prepare_points(
+    dataset_dir: Path,
+    max_points: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    points, colors = load_ply_positions_colors(dataset_dir / "points.ply")
+    raw_count = int(points.shape[0])
+    points = (axis_transform()[:3, :3] @ points.T).T.astype(np.float32)
+    if max_points > 0 and points.shape[0] > max_points:
+        rng = np.random.default_rng(seed)
+        keep = rng.choice(points.shape[0], size=max_points, replace=False)
+        points = points[keep]
+        colors = colors[keep]
+    return points.astype(np.float32), colors.astype(np.float32), raw_count
 
 
 class FrameBatchSampler:

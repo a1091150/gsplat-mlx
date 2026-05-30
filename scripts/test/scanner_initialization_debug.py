@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 
-from train_scanner_points_multiview_3dgs_mlx import (
+from scanner_points_training_utils import (
     points_extent_diagnostics,
     select_point_scale,
     select_scene_scale,

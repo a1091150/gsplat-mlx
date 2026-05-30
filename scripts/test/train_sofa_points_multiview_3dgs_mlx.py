@@ -26,7 +26,7 @@ from train_360_points_multiview_3dgs_mlx import (  # noqa: E402
     mean_loss,
     validate_positive,
 )
-from train_scanner_points_multiview_3dgs_mlx import (  # noqa: E402
+from scanner_points_training_utils import (  # noqa: E402
     FrameBatchSampler,
     ScannerDefaultStrategyConfig,
     ScannerDefaultStrategyRuntime,
@@ -214,6 +214,26 @@ def evaluate_frames_masked(
     ]
 
 
+def render_step_grid_masked(
+    model: ScannerPointsSHModel,
+    cameras,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+) -> np.ndarray:
+    tiles = []
+    for index in range(16):
+        camera = cameras[index % len(cameras)]
+        viewmats, ks = camera_batch_arrays([camera], [0])
+        viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
+        render = render_sh_model(model, viewspace_points, viewmats, ks, width, height, tile_size, sh_degree)
+        mx.eval(render["render_colors"])
+        tiles.append(image_to_u8(np.asarray(render["render_colors"][0], dtype=np.float32)))
+    rows = [np.concatenate(tiles[start : start + 4], axis=1) for start in range(0, 16, 4)]
+    return np.concatenate(rows, axis=0)
+
+
 def load_dataset(args: argparse.Namespace) -> TrainingDataset:
     if args.dataset == "dodecahedron":
         return load_dodecahedron_dataset(
@@ -274,6 +294,7 @@ def parse_args(default_dataset: str = "b075x65r3x") -> argparse.Namespace:
     parser.add_argument("--sh-degree-interval", type=int, default=1000)
     parser.add_argument("--global-scale", type=float, default=1.0)
     parser.add_argument("--log-interval", type=int, default=100)
+    parser.add_argument("--step-image-interval", type=int, default=0)
     parser.add_argument("--mlx-cache-limit-gb", type=float, default=32.0)
     parser.add_argument("--refine-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--refine-prune-opa", type=float, default=0.005)
@@ -331,6 +352,10 @@ def train(args: argparse.Namespace) -> None:
         validate_positive(name, value)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    step_image_dir = args.out_dir / "step"
+    step_image_count = 0
+    if args.step_image_interval > 0:
+        step_image_dir.mkdir(parents=True, exist_ok=True)
     log(f"loading dataset type={args.dataset} size={args.width}x{args.height}")
     dataset = load_dataset(args)
     cameras = (
@@ -507,6 +532,12 @@ def train(args: argparse.Namespace) -> None:
                 f"loss={last_loss:.8f} means_lr={latest_lrs['means']:.8g} "
                 f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
+        if args.step_image_interval > 0 and step % args.step_image_interval == 0:
+            step_image_count += 1
+            image = render_step_grid_masked(model, cameras, args.width, args.height, args.tile_size, active_sh_degree)
+            out_path = step_image_dir / f"out_{step_image_count:06d}.png"
+            write_png(out_path, image)
+            log(f"wrote step image step={step} path={out_path}")
 
     log(f"running final evaluation frames={len(cameras)}")
     final_stats = evaluate_frames_masked(model, cameras, targets, masks, args.width, args.height, args.tile_size, active_sh_degree, args.ssim_lambda, args.ssim_window_size)
@@ -557,6 +588,9 @@ def train(args: argparse.Namespace) -> None:
         "random_gaussians": int(args.num_random_gaussians),
         "frames": len(cameras),
         "steps": int(args.steps),
+        "step_image_interval": int(args.step_image_interval),
+        "step_image_count": int(step_image_count),
+        "step_image_dir": str(step_image_dir) if args.step_image_interval > 0 else None,
         "mlx_cache_limit_bytes": int(cache_limit_bytes),
         "mlx_cache_limit_gb": float(args.mlx_cache_limit_gb),
         "mlx_previous_cache_limit_bytes": int(previous_cache_limit),

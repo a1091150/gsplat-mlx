@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from train_scanner_points_multiview_3dgs_mlx import (
+from scanner_points_training_utils import (
     lr_for_step,
     make_lr_schedule,
     validate_lr_schedule_args,
