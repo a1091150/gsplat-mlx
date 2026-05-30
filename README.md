@@ -1,241 +1,107 @@
 # gsplat-mlx
+
 ## gsplat_core
 
-`gsplat_core` brings core 3D Gaussian Splatting operators from CUDA `gsplat` to
-Apple Silicon through MLX primitives and custom Metal kernels, with
-fixture-based parity checks against the original CUDA implementation.
+`gsplat_core` is a CMake-based mlx custom extension project for Apple Silicon.
+It implements 3D Gaussian Splatting operators with mlx c++ primitives, custom
+metal kernels, nanobind python bindings, and an Xcode-friendly build/test
+workflow.
 
-The project focuses on low-level CUDA-to-Metal operator parity for dense 3DGS
-rendering and training workflows. It provides MLX primitives, Metal kernels,
-C++ implementations, and Python bindings for the main forward rendering path.
+The project is also useful as a template for writing mlx c++ custom extensions.
 
 ## Features
 
-- MLX + Metal implementation of core 3DGS operators.
-- Python extension module powered by nanobind.
-- Dense 3DGS forward rendering pipeline:
-  - quaternion / scale to covariance and precision
-  - spherical harmonics evaluation
-  - fused 3DGS projection
-  - tile intersection and offset generation
-  - rasterization to pixels
-- Selected backward / VJP support for training-oriented workflows.
-- CUDA reference export scripts for parity validation.
-- `.npz` fixture-based comparison between CUDA `gsplat` and MLX / Metal
-  outputs.
-- Xcode, CMake, and Makefile build entry points.
-- MLX training scripts for image fitting, scanner data, COLMAP /
-  Mip-NeRF 360-style scenes, and SPZ export.
+- mlx c++ custom extension with `mlx::core::Primitive`
+- Support python mlx through nanobind.
+- XCode project build and test for metal code.
+- `Cmake` and `Makefile` for easy training setup.
+- mlx python training scripts for image fitting, scanner captures, COLMAP / Mip-NeRF 360-style scenes, and SPZ export.
 
-## Project Status
+## Environment Setup, Build, Tests and Validation
 
-This project is an active migration of the `gsplat` CUDA / PyTorch low-level
-3DGS path to Apple MLX and Metal.
-
-Implemented and validated:
-
-- Dense low-level 3DGS forward chain.
-- Projection, intersection, spherical harmonics, covariance / precision, and
-  rasterization operators.
-- CUDA reference fixture comparison for key operators.
-- CUDA-style analytic spherical harmonics direction VJP in Metal.
-- CUDA-style analytic quaternion / scale covariance and precision VJPs in
-  Metal, including `triu=true`, `triu=false`, optional cotangents, and edge-case
-  fixtures.
-- Basic training smoke tests using MLX autograd.
-
-Current guardrails and known gaps:
-
-- Packed sparse `gsplat` paths.
-- Segmented sort paths.
-- Projection backward currently supports the pinhole path; ortho and fisheye
-  backward VJPs remain guarded until Metal parity fixtures are added.
-- Intersect tile currently uses the dense radius AABB path; CUDA AccuTile /
-  SNUGBOX ellipse intersection with `conics` and `opacities` is not ported.
-- Additional CUDA `.npz` fixtures are still needed for spherical harmonics
-  backward degree 0 through degree 4 with masks and `compute_v_dirs=true`.
-- 2DGS operators.
-- LiDAR operators.
-- Rolling shutter / world-ray rasterization paths.
-- Full high-level `gsplat` Python API compatibility.
-
-Packed and segmented support are not current correctness blockers for the dense
-MLX training path. They are mainly memory, performance, and sparse-workflow
-features, and should be promoted only if a future high-level API or training
-workflow needs them.
-
-## Requirements
-
-- macOS with Apple Silicon.
-- Python 3.11.
-- Conda environment, default: `gsplat_core`.
-- MLX.
-- nanobind.
-- CMake 3.27+.
-- Xcode command line tools.
-
-## Environment Setup
-
-- Install Xcode from the App Store.
-- In Xcode, open Settings -> Components -> Other Components and make sure the
-  Metal Toolchain is installed.
-- Install CMake:
+### Environment Setup
+1. Install Xcode from the App Store.
+2. In Xcode, open Settings -> Components -> Other Components and make sure the metal Toolchain is installed.
+3. Install CMake.
+4. Create Conda environment `gsplat_core`. By default, `Makefile` assumes `gsplat_core` conda environment.
+5. Install required python packages
+6. Install `gsplat_core`
+7. Install `spz`
 
 ```bash
-brew install cmake
-```
-
-- Install Conda. The `Makefile` assumes a Conda environment by default.
-
-Create the default Conda environment:
-
-```bash
+# Install metal tool chain via terminal
+xcodebuild -downloadComponent metalToolchain
+# Install Cmake
+brew instal cmake
+# Create and activeate environment
 conda create -n gsplat_core python=3.11
 conda activate gsplat_core
-```
-
-Install the required Python packages:
-
-```bash
+# Install required package
 pip install mlx==0.30.0 nanobind==2.4.0 cmake opencv-python plyfile pillow scipy pycolmap tyro
-```
-
-Install `gsplat_core`:
-
-```bash
+# Install gsplat_core
 pip install . --no-build-isolation
-```
 
-Install `spz` for SPZ export workflows:
-
-```bash
+# Install spz from submodule, spz does not have pip install.
 git submodule update --init --recursive
 cd submodules/spz
-git checkout ef094fd1a96ca6ff414d72d7904ee4f4f6d97be9
 pip install .
 ```
 
 Notes:
+- mlx releases may require matching nanobind versions. mlx 0.30.0 uses nanobind 2.4.0.
+- mlx >= 0.31.0 changes some code like `get_encoder`. The code would not compile on lastest mlx version.
+- Some `spz` versions have export issues. This project uses `spz` on commit id `ef094fd1a96ca6ff414d72d7904ee4f4f6d97be9`.
 
-- MLX releases may require matching nanobind versions. mlx 0.30.0 uses nanobind 2.4.0.
-- Some `spz` versions have known SPZ export issues.
+### Build and Test
+- The project uses `compare_exported_npz.py` to test with npz files from `gsplat`. See [scripts/export_ref/README.md](scripts/export_ref/README.md) for CUDA-side fixture export instructions.
+- Only XCode can provide debug information and gpu trace on metal shading code. `make xcode-build` create a `xcode_build` directory and `test.cpp` to test.
 
-## Build
-
-Check the local environment:
-
+`Makefile` provide some useful commands to use:
 ```bash
+# Check the local environment
 make env-check
-```
 
-Build the Python extension with Xcode:
-
-```bash
+# Build the python extension with Xcode.
 make xcode-build
-```
 
-Install the package:
-
-```bash
+# Install the package
 make pip-install
-```
 
-For editable development install:
-
-```bash
+# For editable development install
 make pip-develop
-```
 
-## Tests and Validation
-
-Run the C++ / Metal smoke test:
-
-```bash
+# Run the c++ / metal smoke test:
 make codex-xcode-test
-```
 
-Run a dense 3DGS training smoke test:
-
-```bash
+# Run a dense 3DGS training smoke test:
 make codex-dense-training-smoke
-```
 
-Render a random 3DGS PNG for manual inspection:
-
-```bash
+# Render a random 3DGS PNG for manual inspection:
 make codex-random-png
+
+# Compare exported CUDA reference fixtures against the mlx / metal
+python scripts/test/compare_exported_npz.py
 ```
-
-Compare exported CUDA reference fixtures against the MLX / Metal
-implementation:
-
-```bash
-conda run -n gsplat_core python scripts/test/compare_exported_npz.py
-```
-
-See [scripts/export_ref/README.md](scripts/export_ref/README.md) for CUDA-side
-fixture export instructions.
-
-## CUDA Reference Fixtures
-
-The `scripts/export_ref` directory contains scripts intended to run on a CUDA
-machine with PyTorch and `gsplat` installed. These scripts export deterministic
-`.npz` files containing both inputs and CUDA reference outputs.
-
-Example:
-
-```bash
-python scripts/export_ref/export_forward_3dgs_chain.py \
-  --out refs/forward_3dgs_chain.npz
-```
-
-The Mac / MLX side then loads the same inputs, runs `gsplat_core`, and compares
-against the reference outputs.
 
 ## Datasets
+The project supports 5 sources to train:
+- Mip-NeRF 360
+- B075X65R3X(Brown Sofa)
+- 3D Scanner App Captures
+- Dodecahedron (code-generated dataset)
+- Image fittings (code-generated dataset)
 
-Training scripts expect datasets under `datasets/` by default, except scanner
-captures where `SCANNER_DATASET` can point at an exported folder anywhere on
-disk.
+Training scripts expect datasets under `datasets/` by default.
 
 ### Mip-NeRF 360 / COLMAP
 
 The 360 training target uses `datasets/360_v2/<scene>`. Use gsplat's
-[`download_dataset.py`](https://github.com/nerfstudio-project/gsplat/blob/main/examples/datasets/download_dataset.py)
-as the reference downloader; its default dataset downloads `360_v2.zip`.
-
-After downloading and extracting the archive, place the dataset at
-`datasets/360_v2`.
-
-The default Makefile scene is `garden`:
-
-```bash
-make codex-360-points-train-spz
-```
-
-Override the scene or root as needed:
-
-```bash
-make codex-360-points-train-spz \
-  COLMAP_360_ROOT=datasets/360_v2 \
-  COLMAP_360_SCENE=bonsai
-```
+[`download_dataset.py`](https://github.com/nerfstudio-project/gsplat/blob/main/examples/datasets/download_dataset.py) to download datasets. it download 360_v2.zip by default.
 
 ### B075X65R3X(Brown Sofa)
 
 The `B075X65R3X` dataset is available from
-[hbb1/torch-splatting](https://github.com/hbb1/torch-splatting). Download
-`B075X65R3X.zip`, unzip it, and place the extracted folder at:
-
-```text
-datasets/B075X65R3X
-```
-
-Then run:
-
-```bash
-make codex-sofa-train-spz
-```
+[hbb1/torch-splatting](https://github.com/hbb1/torch-splatting). Download `B075X65R3X.zip`, unzip it, and place the extracted folder at `datasets/B075X65R3X`
 
 ### 3D Scanner App Captures
 
@@ -248,54 +114,65 @@ Scanner training currently targets datasets exported from the
 4. Choose the Point Cloud option for scanning.
 5. Export using the "All Data" option and transfer it to your Mac with AirDrop.
 
-Run scanner training by pointing `SCANNER_DATASET` at the exported folder:
+## Training
 
+gsplat use 30000 training steps but it is taking too long on Macbook pro M5 pro 48GB. This projects use 4000 training steps, which takes 15 minutes.
+
+The output directory is under `outputs/`
 ```bash
+# Train Mip-NeRF 360 / COLMAP. The default scene is `garden`
+make codex-360-points-train-spz
+
+# Train using other dataset
+make codex-360-points-train-spz \
+  COLMAP_360_ROOT=datasets/360_v2 \
+  COLMAP_360_SCENE=bonsai
+
+# Train with scanner app's dataset
 make codex-scanner-points-train-spz2 \
   SCANNER_DATASET=/path/to/3d-scanner-app-export
-```
 
-## Training Experiments
-
-The repository includes experimental MLX training scripts for several
-workflows:
-
-```bash
-make codex-image-fitting-train
-make codex-360-points-train-spz
+# Train B075X65R3X(Brown Sofa)
 make codex-sofa-train-spz
+
+# An example to use a single image to train.
+# https://docs.gsplat.studio/main/examples/image.html
+make codex-image-fitting-train
+
+# Train using dodecahedron.
 make codex-dodecahedron-train-spz
 ```
 
-These scripts are development and validation tools for the MLX / Metal 3DGS
-pipeline rather than a stable high-level training API.
+## Some Useful Hints and Notes
 
-## Repository Layout
+### Hints and Experience
+I started to build 3dgs on mlx extension a year ago(2025/05). At the time:
+- No mlx extension or opensource repo to start with, only `axpby` on mlx source repo.
+- 3dgs is mainly on cuda and pytoch.
+- ChatGPT (3 ~ 5.4) was not smart enough to generate mlx python and mlx c++ code.
+- Only XCode can debug and profile metal code.
+- pytorch has `retain_grad()` to get means2d's gradient. mlx does not have one.
+- Learning rate, optimizer setting and loss function almost affect gaussian's quality.
 
-```text
-gsplat_core/
-  C++ operator implementations
-gsplat_core/include/
-  Public C++ headers
-gsplat_core/metal/
-  Metal kernels
-gsplat_core/binding/
-  nanobind Python bindings
-python_package/gsplat_core/
-  Python package wrapper
-scripts/test/
-  Local MLX tests, parity checks, rendering, and training experiments
-scripts/export_ref/
-  CUDA-side reference export scripts
-refs/
-  Exported reference fixtures
-note/
-  Migration notes and source mapping
-```
+The idea from `FastGS` to solve `retain_grad()` by using extra trainable argument `viewspace_points` to get means2d's gradient. In backward path return the means2d's gradient.
 
-## Motivation
+### Codex
+This project's code 100% generated by Codex 5.5 Medium with fast mode. It took me a long time to find a solution, build the project, debug metal code, write mlx primitive, translate pytorch to mlx. Nowadays just tell Codex to do everything, save me months of time.
 
-`gsplat` provides high-performance CUDA kernels for 3D Gaussian Splatting. This
-project explores how much of that low-level rendering and training path can be
-brought to Apple Silicon using MLX primitives and custom Metal kernels, while
-keeping behavior close to the CUDA reference implementation.
+It is easy to write forward path of 3dgs, but it is hard to write and debug backward path. Codex debugs backward path by generate some npz files from gsplat cude then compare values in mlx.
+
+Codex uses harness engineering, which is build tasks -> implement tasks -> validate and test. `Task.md` demonstrates some plan on cuda code to metal Code. I just tell Codex to read gsplat source code to map cuda to metal, split forward path to serveral mlx primitives.
+
+### Current guardrails and known gaps
+
+- Packed sparse `gsplat` paths are not currently implemented.
+- Segmented sort paths are not currently implemented. This project use `mlx::core::argsort` and `mlx::core::take` to gather gaussians.
+- Projection backward currently supports the pinhole path; ortho and fisheye
+  backward VJPs remain guarded.
+- Intersect tile currently uses the dense radius AABB path; CUDA AccuTile /
+  SNUGBOX ellipse intersection with `conics` and `opacities` is not ported.
+- 2DGS, LiDAR, rolling shutter, and world-ray rasterization paths are out of
+  scope for now.
+- Full high-level `gsplat` python API compatibility is not the current goal.
+
+CUDA parity fixtures and training smoke tests are included as validation tools, but they are secondary to the repo's role as a practical mlx c++ / metal custom extension template.
