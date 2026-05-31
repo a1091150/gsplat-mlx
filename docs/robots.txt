@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://a1091150.github.io/gsplat-mlx/sitemap.xml
