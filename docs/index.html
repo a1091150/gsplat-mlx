@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>gsplat_core | 3D Gaussian Splatting on Apple Silicon</title>
+  <meta name="title" content="gsplat_core | 3D Gaussian Splatting on Apple Silicon">
+  <meta name="description" content="Explore gsplat_core, an MLX and Metal implementation of 3D Gaussian Splatting operators for Apple Silicon with C++ primitives, Python bindings, and training demos.">
+  <meta name="keywords" content="gsplat_core, 3D Gaussian Splatting, 3DGS, MLX, Metal, Apple Silicon, Gaussian splatting, neural rendering, computer graphics, Python, C++">
+  <meta name="author" content="gsplat_core contributors">
+  <meta name="robots" content="index, follow">
+  <meta name="language" content="English">
+  <link rel="canonical" href="https://a1091150.github.io/gsplat-mlx/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:site_name" content="gsplat_core">
+  <meta property="og:title" content="gsplat_core | 3D Gaussian Splatting on Apple Silicon">
+  <meta property="og:description" content="MLX C++ primitives, custom Metal kernels, nanobind Python bindings, and training demos for 3D Gaussian Splatting on Mac.">
+  <meta property="og:url" content="https://a1091150.github.io/gsplat-mlx/">
+  <meta property="og:image" content="https://a1091150.github.io/gsplat-mlx/static/images/sofa_train_cover.png">
+  <meta property="og:image:secure_url" content="https://a1091150.github.io/gsplat-mlx/static/images/sofa_train_cover.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:alt" content="Brown sofa 3D Gaussian Splatting training preview from gsplat_core">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="gsplat_core | 3D Gaussian Splatting on Apple Silicon">
+  <meta name="twitter:description" content="An MLX and Metal implementation playground for 3D Gaussian Splatting operators on Apple Silicon.">
+  <meta name="twitter:image" content="https://a1091150.github.io/gsplat-mlx/static/images/sofa_train_cover.png">
+  <meta name="twitter:image:alt" content="Brown sofa 3D Gaussian Splatting training preview from gsplat_core">
+
+  <meta name="theme-color" content="#2563eb">
+  <meta name="msapplication-TileColor" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://ajax.googleapis.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+
+  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
+  <link rel="apple-touch-icon" href="static/images/favicon.ico">
+
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+
+  <link rel="preload" href="static/css/bulma-carousel.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/bulma-slider.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/fontawesome.all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+
+  <noscript>
+    <link rel="stylesheet" href="static/css/bulma-carousel.min.css">
+    <link rel="stylesheet" href="static/css/bulma-slider.min.css">
+    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  </noscript>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script defer src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script defer src="static/js/bulma-carousel.min.js"></script>
+  <script defer src="static/js/bulma-slider.min.js"></script>
+  <script defer src="static/js/index.js"></script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://a1091150.github.io/gsplat-mlx/#webpage",
+        "url": "https://a1091150.github.io/gsplat-mlx/",
+        "name": "gsplat_core | 3D Gaussian Splatting on Apple Silicon",
+        "description": "Project page for gsplat_core, an MLX and Metal implementation of 3D Gaussian Splatting operators for Apple Silicon.",
+        "image": "https://a1091150.github.io/gsplat-mlx/static/images/sofa_train_cover.png",
+        "isPartOf": {
+          "@id": "https://a1091150.github.io/gsplat-mlx/#website"
+        },
+        "about": {
+          "@id": "https://a1091150.github.io/gsplat-mlx/#software"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://a1091150.github.io/gsplat-mlx/#website",
+        "url": "https://a1091150.github.io/gsplat-mlx/",
+        "name": "gsplat_core",
+        "description": "3D Gaussian Splatting on Apple Silicon with MLX, Metal, C++, and Python."
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": "https://a1091150.github.io/gsplat-mlx/#software",
+        "name": "gsplat_core",
+        "description": "A CMake-based MLX custom extension project for 3D Gaussian Splatting on Apple Silicon.",
+        "programmingLanguage": ["C++", "Metal", "Python"],
+        "codeRepository": "https://github.com/a1091150/gsplat-mlx",
+        "runtimePlatform": "macOS Apple Silicon",
+        "isAccessibleForFree": true,
+        "keywords": ["3D Gaussian Splatting", "MLX", "Metal", "Apple Silicon", "neural rendering"]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <button class="scroll-to-top" onclick="scrollToTop()" title="Scroll to top" aria-label="Scroll to top">
+    <i class="fas fa-chevron-up"></i>
+  </button>
+
+  <main id="main-content">
+    <section class="hero">
+      <div class="hero-body">
+        <div class="container is-max-desktop">
+          <div class="columns is-centered">
+            <div class="column has-text-centered">
+              <h1 class="title is-1 publication-title">gsplat_core</h1>
+              <p class="subtitle is-4">
+                3D Gaussian Splatting operators for Apple Silicon, built with MLX C++ primitives,
+                custom Metal kernels, and nanobind Python bindings.
+              </p>
+
+              <div class="is-size-5 publication-authors">
+                <span class="author-block">MLX custom extension · Metal rendering kernels · Xcode-friendly validation</span>
+              </div>
+
+              <div class="column has-text-centered">
+                <div class="publication-links">
+                  <span class="link-block">
+                    <a href="https://github.com/a1091150/gsplat-mlx" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                      <span class="icon"><i class="fab fa-github"></i></span>
+                      <span>Code</span>
+                    </a>
+                  </span>
+
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="hero teaser">
+      <div class="container is-max-desktop">
+        <div class="hero-body">
+          <div class="publication-video">
+            <iframe
+              src="https://www.youtube.com/embed/F167HE1vlUA"
+              title="gsplat_core project video"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen>
+            </iframe>
+          </div>
+          <h2 class="subtitle has-text-centered">
+            A practical Apple Silicon path for experimenting with 3D Gaussian Splatting:
+            write MLX primitives, debug Metal kernels in Xcode, validate against CUDA references,
+            and train scenes directly on Mac.
+          </h2>
+        </div>
+      </div>
+    </section>
+
+    <section class="section hero is-light">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered has-text-centered">
+          <div class="column is-four-fifths">
+            <h2 class="title is-3">Overview</h2>
+            <div class="content has-text-justified">
+              <p>
+                <strong>gsplat_core</strong> is a CMake-based MLX custom extension project for Apple Silicon.
+                It implements 3D Gaussian Splatting operators using <strong>mlx::core::Primitive</strong>,
+                custom <strong>Metal</strong> kernels, and <strong>nanobind</strong> Python bindings.
+                The project is both an implementation playground for 3DGS on Mac and a template for building
+                native MLX C++ extensions with a repeatable build, test, and profiling workflow.
+              </p>
+              <p>
+                The current focus is practical engineering: port CUDA-style 3DGS operators to MLX and Metal,
+                compare behavior against exported gsplat fixtures, and keep a tight development loop through
+                Makefile commands, Python smoke tests, and Xcode GPU debugging.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section hero is-light">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">Training Showcase</h2>
+
+        <div class="training-showcase">
+          <div class="training-target">
+            <img src="static/images/360_garden_target.jpg" alt="Mip-NeRF 360 garden target image" loading="lazy">
+          </div>
+          <div class="training-media">
+            <video poster="static/images/360_garden_target.jpg" controls muted loop preload="metadata" width="100%">
+              <source src="static/videos/360_garden_train.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="training-copy content">
+            <h3 class="title is-4">360 Garden Training</h3>
+            <p>
+              A Mip-NeRF 360 garden scene trained through the COLMAP-style data path. This preview
+              helps inspect how the MLX / Metal pipeline handles a larger real-world capture with
+              textured foliage, depth variation, and many camera views.
+            </p>
+          </div>
+        </div>
+
+        <div class="training-showcase">
+          <div class="training-target">
+            <img src="static/images/sofa_target.png" alt="Brown sofa target image" loading="lazy">
+          </div>
+          <div class="training-media">
+            <video poster="static/images/sofa_train_cover.png" controls muted loop preload="metadata" width="100%">
+              <source src="static/videos/sofa_train.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="training-copy content">
+            <h3 class="title is-4">Brown Sofa Training</h3>
+            <p>
+              Training preview rendered from <code>outputs/sofa_train</code>. This scene exercises a
+              real object dataset path and is useful for checking texture, opacity, and geometry behavior
+              across the MLX / Metal training loop.
+            </p>
+          </div>
+        </div>
+
+        <div class="training-showcase">
+          <div class="training-target">
+            <img src="static/images/dodecahedron_target.png" alt="Dodecahedron target image" loading="lazy">
+          </div>
+          <div class="training-media">
+            <video poster="static/images/dodecahedron_train_cover.png" controls muted loop preload="metadata" width="100%">
+              <source src="static/videos/dodecahedron_train.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="training-copy content">
+            <h3 class="title is-4">Dodecahedron Training</h3>
+            <p>
+              This generated dodecahedron scene is a compact stress test for sharp white edges.
+              It helps reveal whether Gaussian opacity and rasterization preserve clean silhouettes
+              or introduce visible edge bleeding during training.
+            </p>
+          </div>
+        </div>
+
+        <div class="training-showcase training-showcase-wide">
+          <div class="training-media">
+            <video controls muted loop preload="metadata" width="100%">
+              <source src="static/videos/image_fitting_train.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="training-copy content">
+            <h3 class="title is-4">Image Fitting Training</h3>
+            <p>
+              This single-image fitting example follows the gsplat image tutorial. Starting from one
+              target image, this demo trains with front and rear camera views, then uses a side view
+              to visualize how Gaussians move, change color, and evolve from an alternate angle.
+            </p>
+            <p>
+              Tutorial:
+              <a href="https://docs.gsplat.studio/main/examples/image.html" target="_blank" rel="noopener">
+                https://docs.gsplat.studio/main/examples/image.html
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">What It Includes</h2>
+        <div class="columns is-multiline">
+          <div class="column is-half">
+            <div class="content">
+              <h3 class="title is-5">MLX C++ Extension</h3>
+              <p>
+                Native operators are exposed through MLX primitives and Python bindings, making the project
+                usable from MLX training scripts while keeping performance-critical paths in C++ and Metal.
+              </p>
+            </div>
+          </div>
+          <div class="column is-half">
+            <div class="content">
+              <h3 class="title is-5">Metal Kernel Workflow</h3>
+              <p>
+                The repository is structured for Xcode builds, GPU tracing, and low-level debugging,
+                which is essential when developing and validating Metal shading code.
+              </p>
+            </div>
+          </div>
+          <div class="column is-half">
+            <div class="content">
+              <h3 class="title is-5">Training Scripts</h3>
+              <p>
+                Includes MLX Python training flows for image fitting, scanner captures, COLMAP / Mip-NeRF
+                360-style scenes, generated datasets, and SPZ export.
+              </p>
+            </div>
+          </div>
+          <div class="column is-half">
+            <div class="content">
+              <h3 class="title is-5">CUDA Parity Fixtures</h3>
+              <p>
+                Reference npz files exported from gsplat help compare the MLX / Metal implementation against
+                known CUDA behavior during development.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">Supported Training Targets</h2>
+        <div class="content">
+          <ul>
+            <li><strong>Mip-NeRF 360 / COLMAP scenes</strong>, such as garden or bonsai-style scene folders.</li>
+            <li><strong>3D Scanner App captures</strong>, exported from iPhone LiDAR scans using the All Data option.</li>
+            <li><strong>B075X65R3X brown sofa</strong>, from the torch-splatting dataset.</li>
+            <li><strong>Generated scenes</strong>, including dodecahedron and single-image fitting smoke tests.</li>
+            <li><strong>SPZ export</strong>, using a pinned spz version for reproducible export behavior.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="columns is-centered">
+        <div class="column is-8">
+          <div class="content">
+            <p>
+              This page was built using the
+              <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a>,
+              adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
