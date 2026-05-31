@@ -719,6 +719,9 @@ code {
   .training-showcase {
     grid-template-columns: 1fr;
     gap: 1.25rem;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
   }
 
   .training-showcase-wide {
@@ -727,6 +730,11 @@ code {
 
   .training-showcase-wide .training-media {
     grid-column: auto;
+  }
+
+  .training-media,
+  .training-media video {
+    max-width: 100%;
   }
 
   .training-target {
@@ -740,6 +748,19 @@ code {
 
   .training-copy {
     text-align: center;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .training-showcase-section {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .training-showcase-section > .container {
+    width: 100%;
+    padding-left: 0;
+    padding-right: 0;
   }
   
   .teaser .hero-body {
