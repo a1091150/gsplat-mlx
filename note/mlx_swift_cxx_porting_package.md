@@ -57,6 +57,42 @@ xcodebuild build \
 FooProduct MLX check: mlx::core::eval status=0
 ```
 
+另外也驗證過「新的 Swift package 引用修改過的 `mlx-swift`」這條路可行。測試
+package 放在：
+
+```text
+/private/tmp/MlxSwiftCxxPackageProbe
+```
+
+測試指令：
+
+```bash
+xcodebuild test \
+  -scheme MlxSwiftCxxPackageProbe \
+  -destination 'platform=macOS' \
+  -derivedDataPath /private/tmp/MlxSwiftCxxPackageProbeDerived
+```
+
+結果：
+
+```text
+** TEST SUCCEEDED **
+```
+
+XCTest 內真的透過 C wrapper 呼叫到：
+
+```cpp
+auto input = mlx::core::array(3.5f);
+auto output = mlx::core::min(input, mlx::core::Device::cpu);
+mlx::core::eval(output);
+```
+
+並且 Xcode 有把 `default.metallib` 放進 test bundle：
+
+```text
+/private/tmp/MlxSwiftCxxPackageProbeDerived/Build/Products/Debug/MlxSwiftCxxBridgeTests.xctest/Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib
+```
+
 ## 為什麼不能只用 swift build
 
 `mlx-swift` README 已說明：SwiftPM command line 不能 build Metal shaders，最終
@@ -186,6 +222,133 @@ bridging header 只 include C-safe header：
 
 不要在 bridging header 放 C++ header。Swift compiler 不應該看見
 `mlx::core::*`。
+
+## 新 Swift package 引用 mlx-swift 的寫法
+
+如果不是直接在 app target 放 `.mm`，而是新增一個 Swift package 專門做
+`gsplat_core` / MLX C++ wrapper，也可以。架構一樣保持：
+
+```text
+App Swift target
+  -> MyGsplatWrapper Swift/C module
+  -> MyGsplatWrapper C++ target
+  -> MLXCoreCxx product from local mlx-swift
+```
+
+重點是：外部 C++ target 依賴 `MLXCoreCxx` 後，仍然要自己補 MLX C++ header
+root。`Cmlx` target 內部的 `.headerSearchPath("mlx")` 不會自動傳遞給外部
+target。
+
+最小 `Package.swift`：
+
+```swift
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let mlxSwiftPath = "/Users/yangdunfu/Documents/gsplat_core/submodules/mlx-swift"
+
+let package = Package(
+    name: "MlxSwiftCxxPackageProbe",
+    platforms: [
+        .macOS(.v14)
+    ],
+    products: [
+        .library(name: "MlxSwiftCxxBridge", targets: ["MlxSwiftCxxBridge"])
+    ],
+    dependencies: [
+        .package(path: mlxSwiftPath)
+    ],
+    targets: [
+        .target(
+            name: "MlxSwiftCxxBridge",
+            dependencies: [
+                .product(name: "MLXCoreCxx", package: "mlx-swift")
+            ],
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .unsafeFlags([
+                    "-I", "\(mlxSwiftPath)/Source/Cmlx/mlx"
+                ])
+            ]
+        ),
+        .testTarget(
+            name: "MlxSwiftCxxBridgeTests",
+            dependencies: ["MlxSwiftCxxBridge"]
+        )
+    ],
+    cxxLanguageStandard: .cxx17
+)
+```
+
+public C header：
+
+```c
+// Sources/MlxSwiftCxxBridge/include/MlxSwiftCxxBridge.h
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+const char *mlx_swift_cxx_eval_status(void);
+int mlx_swift_cxx_eval_smoke(void);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+C++ implementation：
+
+```cpp
+// Sources/MlxSwiftCxxBridge/MlxSwiftCxxBridge.cpp
+#include "MlxSwiftCxxBridge.h"
+
+#include <exception>
+#include <string>
+
+#include <mlx/mlx.h>
+#include <mlx/ops.h>
+#include <mlx/transforms.h>
+
+const char *mlx_swift_cxx_eval_status(void) {
+  static std::string status;
+
+  try {
+    auto input = mlx::core::array(3.5f);
+    auto output = mlx::core::min(input, mlx::core::Device::cpu);
+    mlx::core::eval(output);
+    status = "mlx::core::eval status=0";
+  } catch (const std::exception &error) {
+    status = std::string("mlx::core::eval failed: ") + error.what();
+  } catch (...) {
+    status = "mlx::core::eval failed: unknown exception";
+  }
+
+  return status.c_str();
+}
+
+int mlx_swift_cxx_eval_smoke(void) {
+  std::string status = mlx_swift_cxx_eval_status();
+  return status.find("status=0") != std::string::npos ? 0 : 1;
+}
+```
+
+Swift test 只 import wrapper，不碰 C++：
+
+```swift
+import MlxSwiftCxxBridge
+import XCTest
+
+final class MlxSwiftCxxBridgeTests: XCTestCase {
+    func testMLXCoreEvalThroughCWrapper() {
+        let status = String(cString: mlx_swift_cxx_eval_status())
+        XCTAssertEqual(mlx_swift_cxx_eval_smoke(), 0, status)
+        XCTAssertEqual(status, "mlx::core::eval status=0")
+    }
+}
+```
 
 ## 最小範例程式碼
 
@@ -414,7 +577,33 @@ FooProduct.app
 - App project 需要知道 local `mlx-swift` 路徑。
 - C++ header search path 目前要手動加。
 
-### 選項 B：gsplat_core 做成 binary target / xcframework
+### 選項 B：外部 Swift package 放 wrapper source
+
+可行，且已用 `xcodebuild test` 驗證。形狀是：
+
+```text
+MlxSwiftCxxPackageProbe
+  -> MlxSwiftCxxBridge target
+      -> public C header
+      -> C++ source includes <mlx/mlx.h>
+      -> depends on MLXCoreCxx
+      -> adds -I .../Source/Cmlx/mlx
+  -> Swift XCTest imports only MlxSwiftCxxBridge
+```
+
+優點：
+
+- app project 可以比較乾淨，不一定要把所有 `.mm/.cpp` 都放在 app target。
+- `gsplat_core` wrapper 可以獨立測試。
+- Swift 仍然只看到 C ABI。
+
+缺點：
+
+- package 內碰 MLX C++ 的 target 還是需要 `.unsafeFlags(["-I", ...])`。
+- 如果只用 `swift build` / `swift test`，可能又回到 `default.metallib` runtime
+  問題；要測 `mlx::core::eval`，仍建議用 `xcodebuild test`。
+
+### 選項 C：gsplat_core 做成 binary target / xcframework
 
 可行，但要避免把 MLX C++ runtime 打包兩份。理想形狀：
 
