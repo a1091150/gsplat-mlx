@@ -43,6 +43,29 @@ SCANNER_POINTS_TRAIN2_SPZ_ROTATION_MODE ?= position_axis
 SCANNER_POINTS_TRAIN2_SPZ_QUAT_ORDER ?= xyzw
 SCANNER_POINTS_TRAIN2_SPZ_COLOR_MODE ?= sh
 
+SCANAPP_DEPTH_DATA ?= /Users/yangdunfu/Documents/iOSProject/ScanProject/20260618_154636
+SCANAPP_DEPTH_OUT ?= outputs/scanapp_depth_train
+SCANAPP_DEPTH_SPZ ?= $(SCANAPP_DEPTH_OUT)/trained_scanapp_depth.spz
+SCANAPP_DEPTH_MODEL_NPZ ?= $(SCANAPP_DEPTH_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_WIDTH ?= 512
+SCANAPP_DEPTH_HEIGHT ?= 512
+SCANAPP_DEPTH_TARGET_POINTS ?= 262144
+SCANAPP_DEPTH_MAX_FRAMES ?= 0
+SCANAPP_DEPTH_FRAME_STEP ?= 1
+SCANAPP_DEPTH_START_INDEX ?= 0
+SCANAPP_DEPTH_EVAL_FRAMES ?= 0
+SCANAPP_DEPTH_EVAL_FRAME_STEP ?= $(SCANAPP_DEPTH_FRAME_STEP)
+SCANAPP_DEPTH_EVAL_START_INDEX ?= 0
+SCANAPP_DEPTH_STEPS ?= $(COLMAP_360_STEPS)
+SCANAPP_DEPTH_BATCH_SIZE ?= $(COLMAP_360_BATCH_SIZE)
+SCANAPP_DEPTH_LOG_INTERVAL ?= $(COLMAP_360_LOG_INTERVAL)
+SCANAPP_DEPTH_STEP_IMAGE_INTERVAL ?= $(COLMAP_360_STEP_IMAGE_INTERVAL)
+SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB ?= $(COLMAP_360_MLX_CACHE_LIMIT_GB)
+SCANAPP_DEPTH_SPZ_SCALE_MODE ?= direct
+SCANAPP_DEPTH_SPZ_ROTATION_MODE ?= position_axis
+SCANAPP_DEPTH_SPZ_QUAT_ORDER ?= xyzw
+SCANAPP_DEPTH_SPZ_COLOR_MODE ?= sh
+
 COLMAP_360_ROOT ?= datasets/360_v2
 COLMAP_360_SCENE ?= garden
 COLMAP_360_DATA ?= $(COLMAP_360_ROOT)/$(COLMAP_360_SCENE)
@@ -107,7 +130,7 @@ ifneq ($(strip $(IMAGE_FITTING_IMG_PATH)),)
 IMAGE_FITTING_IMAGE_FLAGS += --img-path "$(IMAGE_FITTING_IMG_PATH)"
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -121,6 +144,7 @@ help:
 	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-image-fitting-train  Train MLX 3DGS against one image or the synthetic image-fitting target.\n"
 	@printf "  make codex-scanner-points-train-spz2  Train scanner points.ply with 360/gsplat-style settings and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-train-spz  Train ScanApp iPhone depth frames with 360/gsplat-style settings and export SPZ.\n"
 	@printf "  make codex-360-points-train-spz  Train a Mip-NeRF 360/COLMAP scene with gsplat default-style settings and export SPZ.\n"
 	@printf "  make codex-360-points-train-spz-refine  Alias for the gsplat-default 360 refine/densify training target.\n"
 	@printf "  make codex-sofa-train-spz  Train B075X65R3X with 360-style point init/refine settings and export SPZ.\n"
@@ -209,6 +233,9 @@ codex-image-fitting-train:
 
 codex-scanner-points-train-spz2:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanner_points_multiview_3dgs_mlx2.py --data "$(SCANNER_DATASET)" --out-dir "$(SCANNER_POINTS_TRAIN2_OUT)" --out-spz "$(SCANNER_POINTS_TRAIN2_SPZ)" --out-model-npz "$(SCANNER_POINTS_TRAIN2_MODEL_NPZ)" --width $(SCANNER_POINTS_TRAIN2_WIDTH) --height $(SCANNER_POINTS_TRAIN2_HEIGHT) --max-frames $(SCANNER_POINTS_TRAIN2_FRAMES) --frame-step $(SCANNER_POINTS_TRAIN2_FRAME_STEP) --start-index $(SCANNER_POINTS_TRAIN2_START_INDEX) --max-points $(SCANNER_POINTS_TRAIN2_MAX_POINTS) --steps $(SCANNER_POINTS_TRAIN2_STEPS) --batch-size $(SCANNER_POINTS_TRAIN2_BATCH_SIZE) --log-interval $(SCANNER_POINTS_TRAIN2_LOG_INTERVAL) --mlx-cache-limit-gb $(SCANNER_POINTS_TRAIN2_MLX_CACHE_LIMIT_GB) --spz-scale-mode $(SCANNER_POINTS_TRAIN2_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANNER_POINTS_TRAIN2_SPZ_ROTATION_MODE) --spz-quat-order $(SCANNER_POINTS_TRAIN2_SPZ_QUAT_ORDER) --spz-color-mode $(SCANNER_POINTS_TRAIN2_SPZ_COLOR_MODE) --refine-enabled
+
+codex-scanapp-depth-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_OUT)" --out-spz "$(SCANAPP_DEPTH_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
 
 codex-360-points-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_360_points_multiview_3dgs_mlx.py --data "$(COLMAP_360_DATA)" --out-dir "$(COLMAP_360_OUT)" --out-spz "$(COLMAP_360_SPZ)" --out-model-npz "$(COLMAP_360_MODEL_NPZ)" --data-factor $(COLMAP_360_FACTOR) --test-every $(COLMAP_360_TEST_EVERY) --width $(COLMAP_360_WIDTH) --height $(COLMAP_360_HEIGHT) --max-frames $(COLMAP_360_MAX_FRAMES) --frame-step $(COLMAP_360_FRAME_STEP) --start-index $(COLMAP_360_START_INDEX) --eval-max-frames $(COLMAP_360_EVAL_FRAMES) --eval-frame-step $(COLMAP_360_EVAL_FRAME_STEP) --eval-start-index $(COLMAP_360_EVAL_START_INDEX) --max-points $(COLMAP_360_MAX_POINTS) --steps $(COLMAP_360_STEPS) --batch-size $(COLMAP_360_BATCH_SIZE) --log-interval $(COLMAP_360_LOG_INTERVAL) --step-image-interval $(COLMAP_360_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(COLMAP_360_MLX_CACHE_LIMIT_GB) --refine-enabled
