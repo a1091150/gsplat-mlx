@@ -82,6 +82,7 @@ class ScanAppScene:
     colors: np.ndarray
     raw_point_count: int
     sampled_point_count: int
+    retained_point_count: int
     colorized_point_count: int
     confidence_frame_count: int
     confidence_kept_count: int
@@ -270,13 +271,6 @@ def read_confidence(path: Path | None, width: int, height: int) -> np.ndarray | 
     return data.reshape(height, width)
 
 
-def sample_step_for_frames(frames: list[ScanAppFrame], target_points: int) -> int:
-    total_pixels = sum(frame.depth_width * frame.depth_height for frame in frames)
-    if total_pixels <= 0 or target_points <= 0:
-        return 1
-    return max(1, int(np.floor(np.sqrt(float(total_pixels) / float(target_points)))))
-
-
 def make_depth_points_for_frame(
     frame: ScanAppFrame,
     sample_step: int,
@@ -373,7 +367,7 @@ def load_scanapp_scene(
 ) -> ScanAppScene:
     frames = select_frames(load_scanapp_frames(data_dir), max_frames, frame_step, start_index)
     cameras = load_scanapp_cameras(frames, width, height)
-    sample_step = sample_step_for_frames(frames, target_points)
+    sample_step = 1
     point_chunks = []
     color_chunks = []
     totals = {
@@ -407,6 +401,7 @@ def load_scanapp_scene(
         colors=colors,
         raw_point_count=int(raw_points.shape[0]),
         sampled_point_count=int(totals["sampled"]),
+        retained_point_count=int(points.shape[0]),
         colorized_point_count=int(totals["colorized"]),
         confidence_frame_count=confidence_frame_count,
         confidence_kept_count=int(totals["confidence_kept"]),
@@ -708,7 +703,8 @@ def main() -> None:
     points, colors = append_random_gaussians(points, colors, args.num_random_gaussians, args.seed + 1009, args.random_gaussian_bounds_scale)
     log(
         "initializing KNN log scales "
-        f"points={points.shape[0]} raw_depth_points={raw_point_count} init_scale={args.init_scale}"
+        f"points={points.shape[0]} raw_depth_points={raw_point_count} "
+        f"target_points={args.target_points} init_scale={args.init_scale}"
     )
     log_scales = knn_log_scales_from_points(points, args.init_scale)
     point_diagnostics = points_extent_diagnostics(points)
@@ -940,8 +936,10 @@ def main() -> None:
         "width": int(width),
         "height": int(height),
         "raw_point_count": int(raw_point_count),
+        "candidate_point_count": int(raw_point_count),
         "sampled_point_count": int(scene.sampled_point_count),
         "target_point_count": int(args.target_points),
+        "retained_point_count": int(scene.retained_point_count),
         "exported_gaussians": int(exported_gaussians),
         "point_cloud_gaussians": int(points.shape[0] - args.num_random_gaussians),
         "random_gaussians": int(args.num_random_gaussians),
@@ -967,6 +965,7 @@ def main() -> None:
         "initialization": {
             "type": "scanapp_depth_reconstruction",
             "scale_rule": "average distance to 3 nearest neighbors times init_scale",
+            "sampling_rule": "all valid depth pixels are reconstructed first, then globally sampled to target_point_count",
             "init_scale": float(args.init_scale),
             "opacity": float(args.opacity),
             "point_extent": point_diagnostics,
