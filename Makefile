@@ -66,6 +66,12 @@ SCANAPP_DEPTH_SPZ_SCALE_MODE ?= direct
 SCANAPP_DEPTH_SPZ_ROTATION_MODE ?= position_axis
 SCANAPP_DEPTH_SPZ_QUAT_ORDER ?= xyzw
 SCANAPP_DEPTH_SPZ_COLOR_MODE ?= sh
+SCANAPP_DEPTH_MASKED_OUT ?= outputs/scanapp_depth_masked_train
+SCANAPP_DEPTH_MASKED_SPZ ?= $(SCANAPP_DEPTH_MASKED_OUT)/trained_scanapp_depth_masked.spz
+SCANAPP_DEPTH_MASKED_MODEL_NPZ ?= $(SCANAPP_DEPTH_MASKED_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_MASK_MIN ?= 0.05
+SCANAPP_DEPTH_MASK_MAX ?= 5.0
+SCANAPP_DEPTH_MASK_MIN_CONFIDENCE ?= 1
 
 COLMAP_360_ROOT ?= datasets/360_v2
 COLMAP_360_SCENE ?= garden
@@ -131,7 +137,7 @@ ifneq ($(strip $(IMAGE_FITTING_IMG_PATH)),)
 IMAGE_FITTING_IMAGE_FLAGS += --img-path "$(IMAGE_FITTING_IMG_PATH)"
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-scanapp-depth-masked-train-spz codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -146,6 +152,7 @@ help:
 	@printf "  make codex-image-fitting-train  Train MLX 3DGS against one image or the synthetic image-fitting target.\n"
 	@printf "  make codex-scanner-points-train-spz2  Train scanner points.ply with 360/gsplat-style settings and export SPZ.\n"
 	@printf "  make codex-scanapp-depth-train-spz  Train ScanApp iPhone depth frames with 360/gsplat-style settings and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-masked-train-spz  Train ScanApp depth frames with RGB loss masked to a depth range and export SPZ.\n"
 	@printf "  make codex-360-points-train-spz  Train a Mip-NeRF 360/COLMAP scene with gsplat default-style settings and export SPZ.\n"
 	@printf "  make codex-360-points-train-spz-refine  Alias for the gsplat-default 360 refine/densify training target.\n"
 	@printf "  make codex-sofa-train-spz  Train B075X65R3X with 360-style point init/refine settings and export SPZ.\n"
@@ -237,6 +244,9 @@ codex-scanner-points-train-spz2:
 
 codex-scanapp-depth-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_OUT)" --out-spz "$(SCANAPP_DEPTH_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
+
+codex-scanapp-depth-masked-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_masked_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_MASKED_OUT)" --out-spz "$(SCANAPP_DEPTH_MASKED_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MASKED_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
 
 codex-360-points-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_360_points_multiview_3dgs_mlx.py --data "$(COLMAP_360_DATA)" --out-dir "$(COLMAP_360_OUT)" --out-spz "$(COLMAP_360_SPZ)" --out-model-npz "$(COLMAP_360_MODEL_NPZ)" --data-factor $(COLMAP_360_FACTOR) --test-every $(COLMAP_360_TEST_EVERY) --width $(COLMAP_360_WIDTH) --height $(COLMAP_360_HEIGHT) --max-frames $(COLMAP_360_MAX_FRAMES) --frame-step $(COLMAP_360_FRAME_STEP) --start-index $(COLMAP_360_START_INDEX) --eval-max-frames $(COLMAP_360_EVAL_FRAMES) --eval-frame-step $(COLMAP_360_EVAL_FRAME_STEP) --eval-start-index $(COLMAP_360_EVAL_START_INDEX) --max-points $(COLMAP_360_MAX_POINTS) --steps $(COLMAP_360_STEPS) --batch-size $(COLMAP_360_BATCH_SIZE) --log-interval $(COLMAP_360_LOG_INTERVAL) --step-image-interval $(COLMAP_360_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(COLMAP_360_MLX_CACHE_LIMIT_GB) --refine-enabled
