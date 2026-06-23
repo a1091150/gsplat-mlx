@@ -72,12 +72,72 @@ SCANAPP_DEPTH_MASKED_MODEL_NPZ ?= $(SCANAPP_DEPTH_MASKED_OUT)/trained_model_para
 SCANAPP_DEPTH_MASK_MIN ?= 0.05
 SCANAPP_DEPTH_MASK_MAX ?= 5.0
 SCANAPP_DEPTH_MASK_MIN_CONFIDENCE ?= 1
+SCANAPP_DEPTH_MOBILE_PRIOR_OUT ?= outputs/scanapp_depth_mobile_prior_train
+SCANAPP_DEPTH_MOBILE_PRIOR_SPZ ?= $(SCANAPP_DEPTH_MOBILE_PRIOR_OUT)/trained_scanapp_depth_mobile_prior.spz
+SCANAPP_DEPTH_MOBILE_PRIOR_MODEL_NPZ ?= $(SCANAPP_DEPTH_MOBILE_PRIOR_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_FILTER ?= --keyframe-filter-enabled
+SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_TRANSLATION ?= 0.05
+SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_WINDOW ?= 8
+SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_SHARPNESS_STRIDE ?= 8
+SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_FRAMES ?= 16
+SCANAPP_DEPTH_MIN_MOTION_QUALITY ?= 0
+SCANAPP_DEPTH_SHARED_INTRINSICS ?= none
+SCANAPP_DEPTH_PER_FRAME_POINT_SAMPLES ?= 0
+SCANAPP_DEPTH_MOBILE_PRIOR_INIT_MODE ?= disc
+SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_KNN ?= 16
+SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_KNN ?= 3
+SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_SCALE_RATIO ?= 0.2
+SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_SCALE_MULTIPLIER ?= 1.0
+SCANAPP_DEPTH_MOBILE_PRIOR_REFINE_RESET_EVERY ?= 999999
+SCANAPP_DEPTH_POSE_REFINE_OUT ?= outputs/scanapp_depth_pose_refine_train
+SCANAPP_DEPTH_POSE_REFINE_SPZ ?= $(SCANAPP_DEPTH_POSE_REFINE_OUT)/trained_scanapp_depth_pose_refine.spz
+SCANAPP_DEPTH_POSE_REFINE_MODEL_NPZ ?= $(SCANAPP_DEPTH_POSE_REFINE_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_POSE_REFINE_STOP_STEP ?= 3000
+SCANAPP_DEPTH_POSE_ROT_LR ?= 0.0001
+SCANAPP_DEPTH_POSE_TRANS_LR ?= 0.001
+SCANAPP_DEPTH_POSE_ROT_REG ?= 0.01
+SCANAPP_DEPTH_POSE_TRANS_REG ?= 0.01
+SCANAPP_DEPTH_CONSISTENCY_OUT ?= outputs/scanapp_depth_consistency_train
+SCANAPP_DEPTH_CONSISTENCY_SPZ ?= $(SCANAPP_DEPTH_CONSISTENCY_OUT)/trained_scanapp_depth_consistency.spz
+SCANAPP_DEPTH_CONSISTENCY_MODEL_NPZ ?= $(SCANAPP_DEPTH_CONSISTENCY_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_CONSISTENCY_FILTER ?= --consistency-filter-enabled
+SCANAPP_DEPTH_CONSISTENCY_NEIGHBOR_WINDOW ?= 2
+SCANAPP_DEPTH_CONSISTENCY_MIN_VIEWS ?= 1
+SCANAPP_DEPTH_CONSISTENCY_ABS_DEPTH_TOL ?= 0.08
+SCANAPP_DEPTH_CONSISTENCY_REL_DEPTH_TOL ?= 0.03
+SCANAPP_DEPTH_CONSISTENCY_KEEP_UNOBSERVED ?= --consistency-keep-unobserved
+SCANAPP_DEPTH_CHUNKED_OUT ?= outputs/scanapp_depth_chunked_consistency_train
+SCANAPP_DEPTH_CHUNK_SIZE ?= 8
+SCANAPP_DEPTH_CHUNK_STRIDE ?= 4
+SCANAPP_DEPTH_CHUNK_MAX_CHUNKS ?= 0
+SCANAPP_DEPTH_CHUNK_DRY_RUN ?=
+SCANAPP_DEPTH_CHUNK_KEEP_GOING ?=
+SCANAPP_DEPTH_GSPLAT_DEFAULT_OUT ?= outputs/scanapp_depth_gsplat_default_medianK_960x720
+SCANAPP_DEPTH_GSPLAT_DEFAULT_SPZ ?= $(SCANAPP_DEPTH_GSPLAT_DEFAULT_OUT)/trained_scanapp_depth_gsplat_default_medianK.spz
+SCANAPP_DEPTH_GSPLAT_DEFAULT_MODEL_NPZ ?= $(SCANAPP_DEPTH_GSPLAT_DEFAULT_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_GSPLAT_DEFAULT_WIDTH ?= 960
+SCANAPP_DEPTH_GSPLAT_DEFAULT_HEIGHT ?= 720
+SCANAPP_DEPTH_GSPLAT_DEFAULT_STEPS ?= 2000
+SCANAPP_DEPTH_GSPLAT_DEFAULT_TARGET_POINTS ?= 524288
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_OUT ?= outputs/scanapp_depth_normalized_schedule_train
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_SPZ ?= $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_OUT)/trained_scanapp_depth_normalized_schedule.spz
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_MODEL_NPZ ?= $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_OUT)/trained_model_params.npz
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_REFERENCE_WIDTH ?= 1920
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_REFERENCE_HEIGHT ?= 1440
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_FACTORS ?= 4,2
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_STAGE_STEPS ?=
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_STEPS ?= 2000
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_TARGET_POINTS ?= 262144
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_MODE ?= mean
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_KERNELS ?= 7,3
+SCANAPP_DEPTH_NORMALIZED_SCHEDULE_SCALES_LR ?= 5e-4
 
 COLMAP_360_ROOT ?= datasets/360_v2
 COLMAP_360_SCENE ?= garden
 COLMAP_360_DATA ?= $(COLMAP_360_ROOT)/$(COLMAP_360_SCENE)
 COLMAP_360_FACTOR ?= $(if $(filter bonsai counter kitchen room,$(COLMAP_360_SCENE)),2,4)
 COLMAP_360_TEST_EVERY ?= 8
+COLMAP_360_TRAIN_SPLIT ?= train
 COLMAP_360_WIDTH ?= 0
 COLMAP_360_HEIGHT ?= 0
 COLMAP_360_MAX_FRAMES ?= 0
@@ -137,7 +197,7 @@ ifneq ($(strip $(IMAGE_FITTING_IMG_PATH)),)
 IMAGE_FITTING_IMAGE_FLAGS += --img-path "$(IMAGE_FITTING_IMG_PATH)"
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-scanapp-depth-masked-train-spz codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-scanapp-depth-masked-train-spz codex-scanapp-depth-mobile-prior-train-spz codex-scanapp-depth-pose-refine-train-spz codex-scanapp-depth-consistency-train-spz codex-scanapp-depth-chunked-consistency-train-spz codex-scanapp-depth-gsplat-default-train-spz codex-scanapp-depth-normalized-schedule-train-spz codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -153,6 +213,12 @@ help:
 	@printf "  make codex-scanner-points-train-spz2  Train scanner points.ply with 360/gsplat-style settings and export SPZ.\n"
 	@printf "  make codex-scanapp-depth-train-spz  Train ScanApp iPhone depth frames with 360/gsplat-style settings and export SPZ.\n"
 	@printf "  make codex-scanapp-depth-masked-train-spz  Train ScanApp depth frames with RGB loss masked to a depth range and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-mobile-prior-train-spz  Train ScanApp masked depth with PocketGS-style mobile priors and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-pose-refine-train-spz  Train ScanApp masked depth with learnable ARKit pose residuals and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-consistency-train-spz  Train ScanApp masked depth after cross-view depth consistency filtering and export SPZ.\n"
+	@printf "  make codex-scanapp-depth-chunked-consistency-train-spz  Train overlapping local ScanApp consistency chunks and summarize them.\n"
+	@printf "  make codex-scanapp-depth-gsplat-default-train-spz  Train ScanApp depth with 960x720 median K and gsplat default refine settings.\n"
+	@printf "  make codex-scanapp-depth-normalized-schedule-train-spz  Train ScanApp depth with normalized world space and image-scale schedule.\n"
 	@printf "  make codex-360-points-train-spz  Train a Mip-NeRF 360/COLMAP scene with gsplat default-style settings and export SPZ.\n"
 	@printf "  make codex-360-points-train-spz-refine  Alias for the gsplat-default 360 refine/densify training target.\n"
 	@printf "  make codex-sofa-train-spz  Train B075X65R3X with 360-style point init/refine settings and export SPZ.\n"
@@ -248,8 +314,26 @@ codex-scanapp-depth-train-spz:
 codex-scanapp-depth-masked-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_masked_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_MASKED_OUT)" --out-spz "$(SCANAPP_DEPTH_MASKED_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MASKED_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
 
+codex-scanapp-depth-mobile-prior-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_mobile_prior_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_MOBILE_PRIOR_OUT)" --out-spz "$(SCANAPP_DEPTH_MOBILE_PRIOR_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MOBILE_PRIOR_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_FILTER) --keyframe-min-translation $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_TRANSLATION) --keyframe-window $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_WINDOW) --keyframe-sharpness-stride $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_SHARPNESS_STRIDE) --keyframe-min-frames $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_FRAMES) --prior-init-mode $(SCANAPP_DEPTH_MOBILE_PRIOR_INIT_MODE) --prior-normal-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_KNN) --prior-tangent-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_KNN) --prior-normal-scale-ratio $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_SCALE_RATIO) --prior-tangent-scale-multiplier $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_SCALE_MULTIPLIER) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-reset-every $(SCANAPP_DEPTH_MOBILE_PRIOR_REFINE_RESET_EVERY) --refine-enabled
+
+codex-scanapp-depth-pose-refine-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_pose_refine_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_POSE_REFINE_OUT)" --out-spz "$(SCANAPP_DEPTH_POSE_REFINE_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_POSE_REFINE_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_FILTER) --keyframe-min-translation $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_TRANSLATION) --keyframe-window $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_WINDOW) --keyframe-sharpness-stride $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_SHARPNESS_STRIDE) --keyframe-min-frames $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_FRAMES) --prior-init-mode $(SCANAPP_DEPTH_MOBILE_PRIOR_INIT_MODE) --prior-normal-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_KNN) --prior-tangent-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_KNN) --prior-normal-scale-ratio $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_SCALE_RATIO) --prior-tangent-scale-multiplier $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_SCALE_MULTIPLIER) --pose-refine-enabled --pose-refine-stop-step $(SCANAPP_DEPTH_POSE_REFINE_STOP_STEP) --pose-rot-lr $(SCANAPP_DEPTH_POSE_ROT_LR) --pose-trans-lr $(SCANAPP_DEPTH_POSE_TRANS_LR) --pose-rot-reg $(SCANAPP_DEPTH_POSE_ROT_REG) --pose-trans-reg $(SCANAPP_DEPTH_POSE_TRANS_REG) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-reset-every $(SCANAPP_DEPTH_MOBILE_PRIOR_REFINE_RESET_EVERY) --refine-enabled
+
+codex-scanapp-depth-consistency-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_consistency_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_CONSISTENCY_OUT)" --out-spz "$(SCANAPP_DEPTH_CONSISTENCY_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_CONSISTENCY_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_FILTER) --keyframe-min-translation $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_TRANSLATION) --keyframe-window $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_WINDOW) --keyframe-sharpness-stride $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_SHARPNESS_STRIDE) --keyframe-min-frames $(SCANAPP_DEPTH_MOBILE_PRIOR_KEYFRAME_MIN_FRAMES) --min-motion-quality $(SCANAPP_DEPTH_MIN_MOTION_QUALITY) --shared-intrinsics $(SCANAPP_DEPTH_SHARED_INTRINSICS) --per-frame-point-samples $(SCANAPP_DEPTH_PER_FRAME_POINT_SAMPLES) --prior-init-mode $(SCANAPP_DEPTH_MOBILE_PRIOR_INIT_MODE) --prior-normal-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_KNN) --prior-tangent-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_KNN) --prior-normal-scale-ratio $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_SCALE_RATIO) --prior-tangent-scale-multiplier $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_SCALE_MULTIPLIER) $(SCANAPP_DEPTH_CONSISTENCY_FILTER) --consistency-neighbor-window $(SCANAPP_DEPTH_CONSISTENCY_NEIGHBOR_WINDOW) --consistency-min-views $(SCANAPP_DEPTH_CONSISTENCY_MIN_VIEWS) --consistency-abs-depth-tol $(SCANAPP_DEPTH_CONSISTENCY_ABS_DEPTH_TOL) --consistency-rel-depth-tol $(SCANAPP_DEPTH_CONSISTENCY_REL_DEPTH_TOL) $(SCANAPP_DEPTH_CONSISTENCY_KEEP_UNOBSERVED) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-reset-every $(SCANAPP_DEPTH_MOBILE_PRIOR_REFINE_RESET_EVERY) --refine-enabled
+
+codex-scanapp-depth-chunked-consistency-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_chunked_consistency_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_CHUNKED_OUT)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --chunk-size $(SCANAPP_DEPTH_CHUNK_SIZE) --chunk-stride $(SCANAPP_DEPTH_CHUNK_STRIDE) --max-chunks $(SCANAPP_DEPTH_CHUNK_MAX_CHUNKS) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --prior-init-mode $(SCANAPP_DEPTH_MOBILE_PRIOR_INIT_MODE) --prior-normal-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_KNN) --prior-tangent-knn $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_KNN) --prior-normal-scale-ratio $(SCANAPP_DEPTH_MOBILE_PRIOR_NORMAL_SCALE_RATIO) --prior-tangent-scale-multiplier $(SCANAPP_DEPTH_MOBILE_PRIOR_TANGENT_SCALE_MULTIPLIER) $(SCANAPP_DEPTH_CONSISTENCY_FILTER) --consistency-neighbor-window $(SCANAPP_DEPTH_CONSISTENCY_NEIGHBOR_WINDOW) --consistency-min-views $(SCANAPP_DEPTH_CONSISTENCY_MIN_VIEWS) --consistency-abs-depth-tol $(SCANAPP_DEPTH_CONSISTENCY_ABS_DEPTH_TOL) --consistency-rel-depth-tol $(SCANAPP_DEPTH_CONSISTENCY_REL_DEPTH_TOL) $(SCANAPP_DEPTH_CONSISTENCY_KEEP_UNOBSERVED) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-reset-every $(SCANAPP_DEPTH_MOBILE_PRIOR_REFINE_RESET_EVERY) --refine-enabled $(SCANAPP_DEPTH_CHUNK_DRY_RUN) $(SCANAPP_DEPTH_CHUNK_KEEP_GOING)
+
+codex-scanapp-depth-gsplat-default-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_gsplat_default_medianK_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_GSPLAT_DEFAULT_OUT)" --out-spz "$(SCANAPP_DEPTH_GSPLAT_DEFAULT_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_GSPLAT_DEFAULT_MODEL_NPZ)" --width $(SCANAPP_DEPTH_GSPLAT_DEFAULT_WIDTH) --height $(SCANAPP_DEPTH_GSPLAT_DEFAULT_HEIGHT) --target-points $(SCANAPP_DEPTH_GSPLAT_DEFAULT_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_GSPLAT_DEFAULT_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
+
+codex-scanapp-depth-normalized-schedule-train-spz:
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_normalized_schedule_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_OUT)" --out-spz "$(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_MODEL_NPZ)" --reference-width $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_REFERENCE_WIDTH) --reference-height $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_REFERENCE_HEIGHT) --image-scale-factors $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_FACTORS) $(if $(strip $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_STAGE_STEPS)),--stage-steps $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_STAGE_STEPS),) --target-blur-mode $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_MODE) --target-blur-kernels $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_KERNELS) --scales-lr $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_SCALES_LR) --target-points $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_NORMALIZED_SCHEDULE_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
+
 codex-360-points-train-spz:
-	conda run -n $(CONDA_ENV) python scripts/test/train_360_points_multiview_3dgs_mlx.py --data "$(COLMAP_360_DATA)" --out-dir "$(COLMAP_360_OUT)" --out-spz "$(COLMAP_360_SPZ)" --out-model-npz "$(COLMAP_360_MODEL_NPZ)" --data-factor $(COLMAP_360_FACTOR) --test-every $(COLMAP_360_TEST_EVERY) --width $(COLMAP_360_WIDTH) --height $(COLMAP_360_HEIGHT) --max-frames $(COLMAP_360_MAX_FRAMES) --frame-step $(COLMAP_360_FRAME_STEP) --start-index $(COLMAP_360_START_INDEX) --eval-max-frames $(COLMAP_360_EVAL_FRAMES) --eval-frame-step $(COLMAP_360_EVAL_FRAME_STEP) --eval-start-index $(COLMAP_360_EVAL_START_INDEX) --max-points $(COLMAP_360_MAX_POINTS) --steps $(COLMAP_360_STEPS) --batch-size $(COLMAP_360_BATCH_SIZE) --log-interval $(COLMAP_360_LOG_INTERVAL) --step-image-interval $(COLMAP_360_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(COLMAP_360_MLX_CACHE_LIMIT_GB) --refine-enabled
+	conda run -n $(CONDA_ENV) python scripts/test/train_360_points_multiview_3dgs_mlx.py --data "$(COLMAP_360_DATA)" --out-dir "$(COLMAP_360_OUT)" --out-spz "$(COLMAP_360_SPZ)" --out-model-npz "$(COLMAP_360_MODEL_NPZ)" --data-factor $(COLMAP_360_FACTOR) --test-every $(COLMAP_360_TEST_EVERY) --train-split $(COLMAP_360_TRAIN_SPLIT) --width $(COLMAP_360_WIDTH) --height $(COLMAP_360_HEIGHT) --max-frames $(COLMAP_360_MAX_FRAMES) --frame-step $(COLMAP_360_FRAME_STEP) --start-index $(COLMAP_360_START_INDEX) --eval-max-frames $(COLMAP_360_EVAL_FRAMES) --eval-frame-step $(COLMAP_360_EVAL_FRAME_STEP) --eval-start-index $(COLMAP_360_EVAL_START_INDEX) --max-points $(COLMAP_360_MAX_POINTS) --steps $(COLMAP_360_STEPS) --batch-size $(COLMAP_360_BATCH_SIZE) --log-interval $(COLMAP_360_LOG_INTERVAL) --step-image-interval $(COLMAP_360_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(COLMAP_360_MLX_CACHE_LIMIT_GB) --refine-enabled
 
 codex-360-points-train-spz-refine: codex-360-points-train-spz
 

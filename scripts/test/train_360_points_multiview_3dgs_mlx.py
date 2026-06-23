@@ -212,6 +212,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-model-npz", type=Path, default=None)
     parser.add_argument("--data-factor", type=int, default=4)
     parser.add_argument("--test-every", type=int, default=8)
+    parser.add_argument("--train-split", choices=("train", "val", "all"), default="train")
     parser.add_argument("--normalize-world-space", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--width", type=int, default=0)
     parser.add_argument("--height", type=int, default=0)
@@ -328,7 +329,7 @@ def main() -> None:
         test_every=args.test_every,
         normalize_world_space=args.normalize_world_space,
     )
-    cameras = select_colmap_cameras(scene.cameras, "train", args.test_every, args.max_frames, args.frame_step, args.start_index)
+    cameras = select_colmap_cameras(scene.cameras, args.train_split, args.test_every, args.max_frames, args.frame_step, args.start_index)
     eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
     eval_cameras = (
         select_colmap_cameras(scene.cameras, "val", args.test_every, args.eval_max_frames, eval_frame_step, args.eval_start_index)
@@ -577,6 +578,7 @@ def main() -> None:
         "dataset": str(args.data),
         "data_factor": int(args.data_factor),
         "test_every": int(args.test_every),
+        "train_split": args.train_split,
         "normalize_world_space": bool(args.normalize_world_space),
         "width": int(width),
         "height": int(height),
