@@ -135,6 +135,16 @@ SCANAPP_DEPTH_NORMALIZED_SCHEDULE_TARGET_POINTS ?= 262144
 SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_MODE ?= mean
 SCANAPP_DEPTH_NORMALIZED_SCHEDULE_BLUR_KERNELS ?= 7,3
 SCANAPP_DEPTH_NORMALIZED_SCHEDULE_SCALES_LR ?= 5e-4
+SCANAPP_VIDEO_DATA ?= /Users/yangdunfu/Downloads/20260624_125437
+SCANAPP_VIDEO_PREP_OUT ?= outputs/scanapp_video_20260624_125437_compat
+SCANAPP_VIDEO_FFMPEG ?= ffmpeg
+SCANAPP_VIDEO_IMAGE_EXTENSION ?= jpg
+SCANAPP_VIDEO_JPEG_QUALITY ?= 2
+SCANAPP_VIDEO_MAX_FRAMES ?= 0
+SCANAPP_VIDEO_FRAME_STEP ?= 1
+SCANAPP_VIDEO_START_INDEX ?= 0
+SCANAPP_VIDEO_COPY_DEPTH ?= --no-copy-depth
+SCANAPP_VIDEO_PREP_OVERWRITE ?=
 COLMAP_POSE_REFINE_DATA ?= /Users/yangdunfu/Downloads/LidarSeries_20260623_100146_824
 COLMAP_POSE_REFINE_OUT ?= outputs/colmap_pose_refine_splatking_20260623
 COLMAP_POSE_REFINE_MATCHER ?= exhaustive
@@ -225,7 +235,7 @@ ifneq ($(strip $(IMAGE_FITTING_IMG_PATH)),)
 IMAGE_FITTING_IMAGE_FLAGS += --img-path "$(IMAGE_FITTING_IMG_PATH)"
 endif
 
-.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-depth-train-spz codex-scanapp-depth-masked-train-spz codex-scanapp-depth-mobile-prior-train-spz codex-scanapp-depth-pose-refine-train-spz codex-scanapp-depth-consistency-train-spz codex-scanapp-depth-chunked-consistency-train-spz codex-scanapp-depth-gsplat-default-train-spz codex-scanapp-depth-normalized-schedule-train-spz codex-scanapp-export-colmap-seed codex-scanapp-bounded-pose-correction codex-colmap-pose-refine codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
+.PHONY: help env-check xcode-build pip-install pip-develop codex-xcode-test codex-random-png codex-training-smoke codex-dense-training-smoke codex-image-fitting-train codex-scanner-points-train-spz2 codex-scanapp-video-prepare codex-scanapp-depth-train-spz codex-scanapp-depth-masked-train-spz codex-scanapp-depth-mobile-prior-train-spz codex-scanapp-depth-pose-refine-train-spz codex-scanapp-depth-consistency-train-spz codex-scanapp-depth-chunked-consistency-train-spz codex-scanapp-depth-gsplat-default-train-spz codex-scanapp-depth-normalized-schedule-train-spz codex-scanapp-export-colmap-seed codex-scanapp-bounded-pose-correction codex-colmap-pose-refine codex-360-points-train-spz codex-360-points-train-spz-refine codex-sofa-train-spz codex-dodecahedron-train-spz codex-projection-guardrails clean
 
 help:
 	@printf "Targets:\n"
@@ -239,6 +249,7 @@ help:
 	@printf "  make codex-dense-training-smoke  Run dense projection+rasterize training loop smoke test.\n"
 	@printf "  make codex-image-fitting-train  Train MLX 3DGS against one image or the synthetic image-fitting target.\n"
 	@printf "  make codex-scanner-points-train-spz2  Train scanner points.ply with 360/gsplat-style settings and export SPZ.\n"
+	@printf "  make codex-scanapp-video-prepare  Convert ScanApp RGB-video + JSONL captures to the per-frame depth trainer layout.\n"
 	@printf "  make codex-scanapp-depth-train-spz  Train ScanApp iPhone depth frames with 360/gsplat-style settings and export SPZ.\n"
 	@printf "  make codex-scanapp-depth-masked-train-spz  Train ScanApp depth frames with RGB loss masked to a depth range and export SPZ.\n"
 	@printf "  make codex-scanapp-depth-mobile-prior-train-spz  Train ScanApp masked depth with PocketGS-style mobile priors and export SPZ.\n"
@@ -338,6 +349,9 @@ codex-image-fitting-train:
 
 codex-scanner-points-train-spz2:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanner_points_multiview_3dgs_mlx2.py --data "$(SCANNER_DATASET)" --out-dir "$(SCANNER_POINTS_TRAIN2_OUT)" --out-spz "$(SCANNER_POINTS_TRAIN2_SPZ)" --out-model-npz "$(SCANNER_POINTS_TRAIN2_MODEL_NPZ)" --width $(SCANNER_POINTS_TRAIN2_WIDTH) --height $(SCANNER_POINTS_TRAIN2_HEIGHT) --max-frames $(SCANNER_POINTS_TRAIN2_FRAMES) --frame-step $(SCANNER_POINTS_TRAIN2_FRAME_STEP) --start-index $(SCANNER_POINTS_TRAIN2_START_INDEX) --max-points $(SCANNER_POINTS_TRAIN2_MAX_POINTS) --steps $(SCANNER_POINTS_TRAIN2_STEPS) --batch-size $(SCANNER_POINTS_TRAIN2_BATCH_SIZE) --log-interval $(SCANNER_POINTS_TRAIN2_LOG_INTERVAL) --mlx-cache-limit-gb $(SCANNER_POINTS_TRAIN2_MLX_CACHE_LIMIT_GB) --spz-scale-mode $(SCANNER_POINTS_TRAIN2_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANNER_POINTS_TRAIN2_SPZ_ROTATION_MODE) --spz-quat-order $(SCANNER_POINTS_TRAIN2_SPZ_QUAT_ORDER) --spz-color-mode $(SCANNER_POINTS_TRAIN2_SPZ_COLOR_MODE) --refine-enabled
+
+codex-scanapp-video-prepare:
+	conda run -n $(CONDA_ENV) python scripts/test/prepare_scanapp_video_dataset.py --data "$(SCANAPP_VIDEO_DATA)" --out-dir "$(SCANAPP_VIDEO_PREP_OUT)" --ffmpeg-bin "$(SCANAPP_VIDEO_FFMPEG)" --image-extension $(SCANAPP_VIDEO_IMAGE_EXTENSION) --jpeg-quality $(SCANAPP_VIDEO_JPEG_QUALITY) --max-frames $(SCANAPP_VIDEO_MAX_FRAMES) --frame-step $(SCANAPP_VIDEO_FRAME_STEP) --start-index $(SCANAPP_VIDEO_START_INDEX) $(SCANAPP_VIDEO_COPY_DEPTH) $(SCANAPP_VIDEO_PREP_OVERWRITE)
 
 codex-scanapp-depth-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_OUT)" --out-spz "$(SCANAPP_DEPTH_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
