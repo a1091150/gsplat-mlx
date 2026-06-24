@@ -77,6 +77,14 @@ class ScanAppCamera:
 
 
 @dataclass(frozen=True)
+class ScanAppColmapPoseOverride:
+    cameras: list[ScanAppCamera]
+    c2w_by_image_name: dict[str, np.ndarray]
+    raw_k_by_image_name: dict[str, np.ndarray]
+    stats: dict
+
+
+@dataclass(frozen=True)
 class ScanAppScene:
     frames: list[ScanAppFrame]
     cameras: list[ScanAppCamera]
@@ -96,6 +104,7 @@ class ScanAppScene:
     keyframe_filter: dict
     consistency_filter: dict
     splatking_like: dict
+    colmap_pose_override: dict | None
 
 
 def log(message: str) -> None:
@@ -371,6 +380,99 @@ def load_scanapp_cameras(
     return cameras
 
 
+def colmap_sparse_dir(data_dir: Path) -> Path:
+    sparse0 = data_dir / "sparse" / "0"
+    if sparse0.exists():
+        return sparse0
+    sparse = data_dir / "sparse"
+    if sparse.exists():
+        return sparse
+    if all((data_dir / name).exists() for name in ("cameras.txt", "images.txt", "points3D.txt")):
+        return data_dir
+    raise FileNotFoundError(f"COLMAP sparse directory not found in {data_dir}")
+
+
+def load_colmap_pose_override(
+    colmap_data: Path,
+    frames: list[ScanAppFrame],
+    width: int,
+    height: int,
+    use_colmap_intrinsics: bool,
+    shared_intrinsics: np.ndarray | None,
+) -> ScanAppColmapPoseOverride:
+    try:
+        import pycolmap
+    except ImportError as exc:
+        raise ImportError("Using --colmap-pose-data requires pycolmap in the active environment.") from exc
+
+    sparse_dir = colmap_sparse_dir(Path(colmap_data))
+    reconstruction = pycolmap.Reconstruction(str(sparse_dir))
+    images_by_name = {str(image.name): image for image in reconstruction.images.values()}
+    missing = [Path(frame.image_path).name for frame in frames if Path(frame.image_path).name not in images_by_name]
+    if missing:
+        raise RuntimeError(f"COLMAP pose model missing ScanApp frame images: {missing[:8]}")
+
+    cameras: list[ScanAppCamera] = []
+    c2w_by_image_name: dict[str, np.ndarray] = {}
+    raw_k_by_image_name: dict[str, np.ndarray] = {}
+    camera_ids = []
+    for frame in frames:
+        image_name = Path(frame.image_path).name
+        image = images_by_name[image_name]
+        camera = reconstruction.cameras[image.camera_id]
+        w2c_3x4 = np.asarray(image.cam_from_world().matrix(), dtype=np.float32)
+        w2c = np.eye(4, dtype=np.float32)
+        w2c[:3, :] = w2c_3x4
+        c2w = np.linalg.inv(w2c).astype(np.float32)
+        raw_k = np.asarray(camera.calibration_matrix(), dtype=np.float32)
+        raw_k_by_image_name[image_name] = raw_k
+        c2w_by_image_name[image_name] = c2w
+
+        if use_colmap_intrinsics:
+            k = raw_k.copy()
+            k[0, :] *= float(width) / float(camera.width)
+            k[1, :] *= float(height) / float(camera.height)
+        else:
+            sx = float(width) / float(max(1, frame.width))
+            sy = float(height) / float(max(1, frame.height))
+            k = (shared_intrinsics if shared_intrinsics is not None else frame.intrinsics).copy()
+            k[0, :] *= sx
+            k[1, :] *= sy
+        cameras.append(
+            ScanAppCamera(
+                index=frame.index,
+                viewmat=w2c.astype(np.float32),
+                K=k.astype(np.float32),
+                image_path=frame.image_path,
+                raw_width=frame.width,
+                raw_height=frame.height,
+                frame_name=frame.name,
+            )
+        )
+        camera_ids.append(int(image.camera_id))
+
+    centers = np.stack([np.linalg.inv(camera.viewmat)[:3, 3] for camera in cameras], axis=0)
+    center = np.mean(centers, axis=0)
+    distances = np.linalg.norm(centers - center[None, :], axis=1)
+    stats = {
+        "enabled": True,
+        "path": str(Path(colmap_data)),
+        "sparse_dir": str(sparse_dir),
+        "frame_count": int(len(frames)),
+        "matched_image_count": int(len(cameras)),
+        "use_colmap_intrinsics": bool(use_colmap_intrinsics),
+        "unique_camera_ids": sorted(set(camera_ids)),
+        "camera_center_radius_max": float(np.max(distances)) if distances.size else 0.0,
+        "camera_center_radius_median": float(np.median(distances)) if distances.size else 0.0,
+    }
+    return ScanAppColmapPoseOverride(
+        cameras=cameras,
+        c2w_by_image_name=c2w_by_image_name,
+        raw_k_by_image_name=raw_k_by_image_name,
+        stats=stats,
+    )
+
+
 def read_depth_float32(path: Path, width: int, height: int) -> np.ndarray:
     expected = width * height
     data = np.fromfile(path, dtype="<f4", count=expected)
@@ -519,6 +621,8 @@ def make_depth_points_for_frame(
     shared_intrinsics: np.ndarray | None,
     per_frame_point_samples: int,
     seed: int,
+    colmap_c2w: np.ndarray | None = None,
+    colmap_raw_k: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
     depth = read_depth_float32(frame.depth_path, frame.depth_width, frame.depth_height)
     confidence = read_confidence(frame.confidence_path, frame.depth_width, frame.depth_height)
@@ -550,17 +654,24 @@ def make_depth_points_for_frame(
 
     sx = float(frame.depth_width) / float(max(1, frame.width))
     sy = float(frame.depth_height) / float(max(1, frame.height))
-    intrinsics = shared_intrinsics if shared_intrinsics is not None else frame.intrinsics
+    intrinsics = colmap_raw_k if colmap_raw_k is not None else (shared_intrinsics if shared_intrinsics is not None else frame.intrinsics)
     fx = float(intrinsics[0, 0]) * sx
     fy = float(intrinsics[1, 1]) * sy
     cx = float(intrinsics[0, 2]) * sx
     cy = float(intrinsics[1, 2]) * sy
     local_x = (kept_x - cx) * kept_z / fx
-    local_y = -(kept_y - cy) * kept_z / fy
-    local_z = -kept_z
+    if colmap_c2w is not None:
+        local_y = (kept_y - cy) * kept_z / fy
+        local_z = kept_z
+    else:
+        local_y = -(kept_y - cy) * kept_z / fy
+        local_z = -kept_z
     local = np.stack([local_x, local_y, local_z, np.ones_like(local_z)], axis=1).astype(np.float32)
-    world = (frame.camera_to_world @ local.T).T[:, :3].astype(np.float32)
-    world = transform_scanner_points(world)
+    if colmap_c2w is not None:
+        world = (colmap_c2w @ local.T).T[:, :3].astype(np.float32)
+    else:
+        world = (frame.camera_to_world @ local.T).T[:, :3].astype(np.float32)
+        world = transform_scanner_points(world)
 
     with Image.open(frame.image_path) as image:
         rgb = image.convert("RGB")
@@ -633,6 +744,9 @@ def load_scanapp_scene(
     consistency_abs_depth_tol: float,
     consistency_rel_depth_tol: float,
     consistency_keep_unobserved: bool,
+    colmap_pose_data: Path | None,
+    colmap_pose_intrinsics: bool,
+    colmap_pose_depth_points: bool,
 ) -> ScanAppScene:
     frames = select_frames(load_scanapp_frames(data_dir), max_frames, frame_step, start_index)
     frames, motion_quality_filter = select_motion_quality_frames(frames, min_motion_quality)
@@ -653,7 +767,12 @@ def load_scanapp_scene(
             "selected_frame_indices": [int(frame.index) for frame in frames],
         }
     shared_intrinsics = shared_median_intrinsics(frames) if shared_intrinsics_mode == "median" else None
-    cameras = load_scanapp_cameras(frames, width, height, shared_intrinsics)
+    colmap_pose_override = (
+        load_colmap_pose_override(colmap_pose_data, frames, width, height, colmap_pose_intrinsics, shared_intrinsics)
+        if colmap_pose_data is not None
+        else None
+    )
+    cameras = colmap_pose_override.cameras if colmap_pose_override is not None else load_scanapp_cameras(frames, width, height, shared_intrinsics)
     depth_cache = [depth_projection_arrays(frame, shared_intrinsics) for frame in frames]
     sample_step = 1
     point_chunks = []
@@ -692,6 +811,16 @@ def load_scanapp_scene(
             shared_intrinsics,
             per_frame_point_samples,
             seed,
+            (
+                colmap_pose_override.c2w_by_image_name[Path(frame.image_path).name]
+                if colmap_pose_override is not None and colmap_pose_depth_points
+                else None
+            ),
+            (
+                colmap_pose_override.raw_k_by_image_name[Path(frame.image_path).name]
+                if colmap_pose_override is not None and colmap_pose_depth_points and colmap_pose_intrinsics
+                else None
+            ),
         )
         if consistency_filter_enabled and points.size:
             keep, consistency_stats = depth_consistency_keep_mask(
@@ -755,6 +884,14 @@ def load_scanapp_scene(
             "sampled_after_filter": int(totals["sampled_after_filter"]),
             "per_frame_sampled_total": int(totals["per_frame_sampled"]),
         },
+        colmap_pose_override=(
+            {
+                **colmap_pose_override.stats,
+                "depth_points_use_colmap_pose": bool(colmap_pose_depth_points),
+            }
+            if colmap_pose_override is not None
+            else None
+        ),
     )
 
 
@@ -1020,6 +1157,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keyframe-min-frames", type=int, default=16)
     parser.add_argument("--min-motion-quality", type=float, default=0.0)
     parser.add_argument("--shared-intrinsics", choices=("none", "median"), default="none")
+    parser.add_argument("--colmap-pose-data", type=Path, default=None)
+    parser.add_argument("--colmap-pose-intrinsics", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--colmap-pose-depth-points", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--per-frame-point-samples", type=int, default=0)
     parser.add_argument("--num-random-gaussians", type=int, default=0)
     parser.add_argument("--random-gaussian-bounds-scale", type=float, default=1.05)
@@ -1047,7 +1187,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-max-depth", type=float, default=DEFAULT_MASK_MAX_DEPTH_METERS)
     parser.add_argument("--mask-min-confidence", type=int, default=MIN_CONFIDENCE)
     parser.add_argument("--means-lr", type=float, default=1.6e-4)
-    parser.add_argument("--scales-lr", type=float, default=5.0e-3)
+    parser.add_argument("--scales-lr", type=float, default=5.0e-4)
     parser.add_argument("--opacities-lr", type=float, default=5.0e-2)
     parser.add_argument("--quats-lr", type=float, default=1.0e-3)
     parser.add_argument("--sh0-lr", type=float, default=2.5e-3)
@@ -1117,6 +1257,8 @@ def main() -> None:
         raise ValueError("--min-motion-quality must be nonnegative")
     if args.per_frame_point_samples < 0:
         raise ValueError("--per-frame-point-samples must be nonnegative")
+    if args.colmap_pose_data is not None and not args.colmap_pose_data.exists():
+        raise FileNotFoundError(f"--colmap-pose-data not found: {args.colmap_pose_data}")
     if args.prior_normal_knn < 3:
         raise ValueError("--prior-normal-knn must be at least 3")
     if args.prior_tangent_knn < 1:
@@ -1192,6 +1334,9 @@ def main() -> None:
         consistency_abs_depth_tol=args.consistency_abs_depth_tol,
         consistency_rel_depth_tol=args.consistency_rel_depth_tol,
         consistency_keep_unobserved=args.consistency_keep_unobserved,
+        colmap_pose_data=args.colmap_pose_data,
+        colmap_pose_intrinsics=args.colmap_pose_intrinsics,
+        colmap_pose_depth_points=args.colmap_pose_depth_points,
     )
     cameras = scene.cameras
     eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
@@ -1207,7 +1352,17 @@ def main() -> None:
                 min(args.keyframe_min_frames, len(eval_frames)),
             )
     eval_shared_intrinsics = shared_median_intrinsics(scene.frames) if args.shared_intrinsics == "median" else None
-    eval_cameras = load_scanapp_cameras(eval_frames, width, height, eval_shared_intrinsics) if eval_frames else []
+    if eval_frames and args.colmap_pose_data is not None:
+        eval_cameras = load_colmap_pose_override(
+            args.colmap_pose_data,
+            eval_frames,
+            width,
+            height,
+            args.colmap_pose_intrinsics,
+            eval_shared_intrinsics,
+        ).cameras
+    else:
+        eval_cameras = load_scanapp_cameras(eval_frames, width, height, eval_shared_intrinsics) if eval_frames else []
     targets = [mx.array(load_target(camera.image_path, width, height)[None, ...], dtype=mx.float32) for camera in cameras]
     target_masks = [
         mx.array(
@@ -1535,6 +1690,7 @@ def main() -> None:
         },
         "keyframe_filter": scene.keyframe_filter,
         "consistency_filter": scene.consistency_filter,
+        "colmap_pose_override": scene.colmap_pose_override,
         "splatking_like": scene.splatking_like,
         "steps": int(args.steps),
         "step_image_interval": int(args.step_image_interval),
