@@ -217,13 +217,13 @@ class FrameBatchSampler:
             raise ValueError("frame_count must be positive")
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
-        if mode not in ("sequential", "shuffle"):
+        if mode not in ("sequential", "shuffle", "pingpong"):
             raise ValueError(f"Unsupported frame sampling mode: {mode}")
         self.frame_count = int(frame_count)
         self.batch_size = int(batch_size)
         self.mode = mode
         self.rng = np.random.default_rng(seed)
-        self.order = np.arange(self.frame_count, dtype=np.int32)
+        self.order = self._make_order()
         self.position = 0
         self.epoch = 0
         self.usage_counts = np.zeros((self.frame_count,), dtype=np.int64)
@@ -231,16 +231,23 @@ class FrameBatchSampler:
         if self.mode == "shuffle":
             self.rng.shuffle(self.order)
 
+    def _make_order(self) -> np.ndarray:
+        forward = np.arange(self.frame_count, dtype=np.int32)
+        if self.mode != "pingpong" or self.frame_count <= 1:
+            return forward
+        backward = np.arange(self.frame_count - 2, 0, -1, dtype=np.int32)
+        return np.concatenate([forward, backward])
+
     def next_batch(self) -> list[int]:
         batch = []
         while len(batch) < self.batch_size:
-            if self.position >= self.frame_count:
+            if self.position >= len(self.order):
                 self.epoch += 1
                 self.position = 0
-                self.order = np.arange(self.frame_count, dtype=np.int32)
+                self.order = self._make_order()
                 if self.mode == "shuffle":
                     self.rng.shuffle(self.order)
-            take = min(self.batch_size - len(batch), self.frame_count - self.position)
+            take = min(self.batch_size - len(batch), len(self.order) - self.position)
             batch.extend(self.order[self.position : self.position + take].astype(int).tolist())
             self.position += take
         for idx in batch:
@@ -254,6 +261,7 @@ class FrameBatchSampler:
             "mode": self.mode,
             "batch_size": self.batch_size,
             "frame_count": self.frame_count,
+            "order_length": int(len(self.order)),
             "completed_epochs": int(self.epoch),
             "usage_counts": self.usage_counts.astype(int).tolist(),
             "usage_count_min": int(self.usage_counts.min()) if self.usage_counts.size else 0,

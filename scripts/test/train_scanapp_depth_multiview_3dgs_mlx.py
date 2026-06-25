@@ -548,6 +548,24 @@ def render_step_grid(
     return np.concatenate(rows, axis=0)
 
 
+def render_step_compare(
+    model: ScannerPointsSHModel,
+    camera,
+    target: mx.array,
+    initial_image: np.ndarray,
+    width: int,
+    height: int,
+    tile_size: int,
+    sh_degree: int,
+) -> np.ndarray:
+    viewmats, ks = camera_batch_arrays([camera], [0])
+    viewspace_points = mx.zeros((1, 1, model.means.shape[1], 2), dtype=mx.float32)
+    render = render_sh_model(model, viewspace_points, viewmats, ks, width, height, tile_size, sh_degree)
+    mx.eval(render["render_colors"])
+    current_image = np.asarray(render["render_colors"][0], dtype=np.float32)
+    return image_to_u8(concat_compare(np.asarray(target[0]), initial_image, current_image))
+
+
 def mean_loss(stats: list[dict]) -> float:
     return float(np.mean([item["loss"] for item in stats])) if stats else 0.0
 
@@ -580,12 +598,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=30000)
     parser.add_argument("--batch-size", type=int, default=1)
-    parser.add_argument("--frame-sampling", choices=("sequential", "shuffle"), default="shuffle")
+    parser.add_argument("--frame-sampling", choices=("sequential", "shuffle", "pingpong"), default="pingpong")
     parser.add_argument("--frame-shuffle-seed", type=int, default=None)
     parser.add_argument("--ssim-lambda", type=float, default=0.2)
     parser.add_argument("--ssim-window-size", type=int, default=11)
     parser.add_argument("--means-lr", type=float, default=1.6e-4)
-    parser.add_argument("--scales-lr", type=float, default=5.0e-3)
+    parser.add_argument("--scales-lr", type=float, default=6.0e-4)
     parser.add_argument("--opacities-lr", type=float, default=5.0e-2)
     parser.add_argument("--quats-lr", type=float, default=1.0e-3)
     parser.add_argument("--sh0-lr", type=float, default=2.5e-3)
@@ -595,6 +613,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-scale", type=float, default=1.0)
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument("--step-image-interval", type=int, default=0)
+    parser.add_argument("--write-final-compare", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--mlx-cache-limit-gb", type=float, default=32.0)
     parser.add_argument("--refine-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--refine-prune-opa", type=float, default=0.005)
@@ -866,8 +885,18 @@ def main() -> None:
             )
         if args.step_image_interval > 0 and step % args.step_image_interval == 0:
             step_image_count += 1
-            image = render_step_grid(model, cameras, width, height, args.tile_size, active_sh_degree)
-            out_path = step_image_dir / f"out_{step_image_count:06d}.png"
+            step_frame_index = batch_ids[0]
+            image = render_step_compare(
+                model,
+                cameras[step_frame_index],
+                targets[step_frame_index],
+                initial_stats[step_frame_index]["image"],
+                width,
+                height,
+                args.tile_size,
+                active_sh_degree,
+            )
+            out_path = step_image_dir / f"compare_step_{step:06d}_frame_{cameras[step_frame_index].index:05d}.png"
             write_png(out_path, image)
             log(f"wrote step image step={step} path={out_path}")
 
@@ -876,12 +905,16 @@ def main() -> None:
     eval_final_stats = evaluate_frames(model, eval_cameras, eval_targets, width, height, args.tile_size, active_sh_degree, args.ssim_lambda, args.ssim_window_size) if eval_cameras else []
     final_mean_loss = mean_loss(final_stats)
 
-    for initial, final, target in zip(initial_stats, final_stats, targets, strict=True):
-        frame_index = final["frame_index"]
-        write_png(args.out_dir / f"compare_frame_{frame_index:05d}.png", image_to_u8(concat_compare(np.asarray(target[0]), initial["image"], final["image"])))
-    for initial, final, target in zip(eval_initial_stats, eval_final_stats, eval_targets, strict=True):
-        frame_index = final["frame_index"]
-        write_png(args.out_dir / f"compare_eval_frame_{frame_index:05d}.png", image_to_u8(concat_compare(np.asarray(target[0]), initial["image"], final["image"])))
+    final_compare_image_count = 0
+    if args.write_final_compare:
+        for initial, final, target in zip(initial_stats, final_stats, targets, strict=True):
+            frame_index = final["frame_index"]
+            write_png(args.out_dir / f"compare_frame_{frame_index:05d}.png", image_to_u8(concat_compare(np.asarray(target[0]), initial["image"], final["image"])))
+            final_compare_image_count += 1
+        for initial, final, target in zip(eval_initial_stats, eval_final_stats, eval_targets, strict=True):
+            frame_index = final["frame_index"]
+            write_png(args.out_dir / f"compare_eval_frame_{frame_index:05d}.png", image_to_u8(concat_compare(np.asarray(target[0]), initial["image"], final["image"])))
+            final_compare_image_count += 1
 
     if last_loss is None or not np.isfinite(final_mean_loss):
         raise AssertionError("ScanApp depth training loss should be finite")
@@ -957,6 +990,8 @@ def main() -> None:
         "step_image_interval": int(args.step_image_interval),
         "step_image_count": int(step_image_count),
         "step_image_dir": str(step_image_dir) if args.step_image_interval > 0 else None,
+        "final_compare_images_enabled": bool(args.write_final_compare),
+        "final_compare_image_count": int(final_compare_image_count),
         "mlx_cache_limit_bytes": int(cache_limit_bytes),
         "mlx_cache_limit_gb": float(args.mlx_cache_limit_gb),
         "mlx_previous_cache_limit_bytes": int(previous_cache_limit),

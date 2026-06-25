@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import numpy as np
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -90,6 +92,89 @@ def run_ffmpeg_extract(args: argparse.Namespace, rgb_video: Path, images_dir: Pa
     subprocess.run(command, check=True)
 
 
+def run_ffmpeg_extract_gray16(args: argparse.Namespace, depth_video: Path, raw_path: Path) -> None:
+    command = [
+        args.ffmpeg_bin,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(depth_video),
+        "-vsync",
+        "0",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray16le",
+        str(raw_path),
+    ]
+    subprocess.run(command, check=True)
+
+
+def find_depth_video_info(records: list[tuple[dict, Path, int]]) -> dict | None:
+    for raw, _, _ in records:
+        depth_video = raw.get("depth_video")
+        if isinstance(depth_video, dict) and isinstance(depth_video.get("path"), str):
+            return depth_video
+    return None
+
+
+def decode_packed_depth_video(
+    args: argparse.Namespace,
+    records: list[tuple[dict, Path, int]],
+    out_dir: Path,
+) -> tuple[np.ndarray, dict]:
+    depth_video = find_depth_video_info(records)
+    if depth_video is None:
+        raise RuntimeError("Missing per-frame depth path and no depth_video metadata was found")
+
+    width = int(depth_video.get("width", 0))
+    height = int(depth_video.get("height", 0))
+    if width <= 0 or height <= 0:
+        raise RuntimeError(f"Invalid depth_video dimensions: width={width} height={height}")
+
+    depth_video_path = resolve_relative_path(args.data, depth_video["path"])
+    if not depth_video_path.exists():
+        raise FileNotFoundError(f"Depth video from metadata does not exist: {depth_video_path}")
+
+    raw_path = out_dir / "depth" / "_depth_video_gray16.raw"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    run_ffmpeg_extract_gray16(args, depth_video_path, raw_path)
+    try:
+        raw = np.fromfile(raw_path, dtype="<u2")
+    finally:
+        raw_path.unlink(missing_ok=True)
+
+    pixels_per_frame = width * height
+    if raw.size % pixels_per_frame != 0:
+        raise RuntimeError(
+            f"Decoded depth video size is not divisible by frame size: values={raw.size} frame_pixels={pixels_per_frame}"
+        )
+    frame_count = raw.size // pixels_per_frame
+    if frame_count != len(records):
+        raise RuntimeError(f"Decoded depth frame count mismatch: video={frame_count} jsonl_records={len(records)}")
+
+    min_depth = float(depth_video.get("min_depth", 0.0))
+    max_depth = float(depth_video.get("max_depth", 5.0))
+    invalid_value = int(depth_video.get("invalid_value", 0))
+    if max_depth <= min_depth:
+        raise RuntimeError(f"Invalid depth_video range: min_depth={min_depth} max_depth={max_depth}")
+
+    gray16 = raw.reshape(frame_count, height, width).astype(np.float32)
+    quantized = np.rint(gray16 * (1023.0 / 65535.0)).astype(np.float32)
+    depth = min_depth + (quantized / 1023.0) * (max_depth - min_depth)
+    depth[quantized <= invalid_value] = 0.0
+    return depth.astype("<f4", copy=False), {
+        "depth_video": str(depth_video_path),
+        "depth_video_width": width,
+        "depth_video_height": height,
+        "decoded_depth_video_frames": int(frame_count),
+        "decoded_depth_video_encoding": depth_video.get("encoding"),
+        "decoded_depth_video_codec": depth_video.get("codec"),
+    }
+
+
 def select_records(
     records: list[tuple[dict, Path, int]],
     start_index: int,
@@ -138,8 +223,21 @@ def write_metadata_and_depth_assets(
     linked_confidence = 0
     copied_confidence = 0
 
-    selected = select_records(records, args.start_index, args.frame_step, args.max_frames)
-    for raw, source_jsonl, source_line in selected:
+    selected_indices = list(range(len(records)))[args.start_index::args.frame_step]
+    if args.max_frames > 0:
+        selected_indices = selected_indices[:args.max_frames]
+    selected = [records[index] for index in selected_indices]
+
+    needs_depth_video_decode = any(
+        not isinstance(raw.get("depth"), dict) or not isinstance(raw.get("depth", {}).get("path"), str)
+        for raw, _, _ in selected
+    )
+    decoded_depth_frames = None
+    decoded_depth_summary: dict = {}
+    if needs_depth_video_decode:
+        decoded_depth_frames, decoded_depth_summary = decode_packed_depth_video(args, records, out_dir)
+
+    for record_index, (raw, source_jsonl, source_line) in zip(selected_indices, selected):
         frame_index = int(raw.get("frame_index", written + 1))
         frame_name = str(raw.get("frame_name", f"frame_{frame_index:06d}"))
         image_name = f"frame_{frame_index:06d}.{args.image_extension}"
@@ -156,18 +254,34 @@ def write_metadata_and_depth_assets(
 
         depth = converted.get("depth")
         if not isinstance(depth, dict) or not isinstance(depth.get("path"), str):
-            raise RuntimeError(f"Missing per-frame depth path for {frame_name} in {source_jsonl}:{source_line}")
-        depth_src = resolve_relative_path(args.data, depth["path"])
-        if not depth_src.exists():
-            raise FileNotFoundError(f"Depth file from metadata does not exist: {depth_src}")
-        depth_dst = depth_dir / depth_src.name
-        mode = link_or_copy(depth_src, depth_dst, args.copy_depth)
-        linked_depth += mode == "symlink"
-        copied_depth += mode == "copy"
-        depth = dict(depth)
-        depth["path"] = f"depth/{depth_dst.name}"
+            if decoded_depth_frames is None:
+                raise RuntimeError(f"Missing per-frame depth path for {frame_name} in {source_jsonl}:{source_line}")
+            depth_dst = depth_dir / f"{frame_name}_depth_f32.bin"
+            decoded_depth_frames[record_index].tofile(depth_dst)
+            depth_video = raw.get("depth_video") if isinstance(raw.get("depth_video"), dict) else {}
+            depth = {
+                "path": f"depth/{depth_dst.name}",
+                "format": "float32",
+                "width": int(depth_video.get("width", decoded_depth_frames.shape[2])),
+                "height": int(depth_video.get("height", decoded_depth_frames.shape[1])),
+            }
+            copied_depth += 1
+        else:
+            depth_src = resolve_relative_path(args.data, depth["path"])
+            if not depth_src.exists():
+                raise FileNotFoundError(f"Depth file from metadata does not exist: {depth_src}")
+            depth_dst = depth_dir / depth_src.name
+            mode = link_or_copy(depth_src, depth_dst, args.copy_depth)
+            linked_depth += mode == "symlink"
+            copied_depth += mode == "copy"
+            depth = dict(depth)
+            depth["path"] = f"depth/{depth_dst.name}"
 
         confidence_rel = depth.get("confidence_path")
+        if not isinstance(confidence_rel, str):
+            confidence = raw.get("confidence")
+            if isinstance(confidence, dict) and isinstance(confidence.get("path"), str):
+                confidence_rel = confidence["path"]
         if isinstance(confidence_rel, str):
             confidence_src = resolve_relative_path(args.data, confidence_rel)
             if confidence_src.exists():
@@ -197,6 +311,7 @@ def write_metadata_and_depth_assets(
         "depth_copies": copied_depth,
         "confidence_symlinks": linked_confidence,
         "confidence_copies": copied_confidence,
+        **decoded_depth_summary,
     }
 
 
