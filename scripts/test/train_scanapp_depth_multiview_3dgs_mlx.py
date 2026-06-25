@@ -44,6 +44,8 @@ MAX_SUPPORTED_SH_DEGREE = 3
 MIN_DEPTH_METERS = 0.05
 MAX_DEPTH_METERS = 6.0
 MIN_CONFIDENCE = 1
+TRAINING_GEOMETRY_SCALE = 1.0
+FINAL_UPDATE_ONLY_STEPS = 500
 
 
 @dataclass(frozen=True)
@@ -253,6 +255,27 @@ def load_scanapp_cameras(frames: list[ScanAppFrame], width: int, height: int) ->
     return cameras
 
 
+def scale_camera_geometry(cameras: list[ScanAppCamera], scale: float) -> list[ScanAppCamera]:
+    if scale == 1.0:
+        return cameras
+    scaled: list[ScanAppCamera] = []
+    for camera in cameras:
+        viewmat = camera.viewmat.copy()
+        viewmat[:3, 3] *= float(scale)
+        scaled.append(
+            ScanAppCamera(
+                index=camera.index,
+                viewmat=viewmat.astype(np.float32),
+                K=camera.K,
+                image_path=camera.image_path,
+                raw_width=camera.raw_width,
+                raw_height=camera.raw_height,
+                frame_name=camera.frame_name,
+            )
+        )
+    return scaled
+
+
 def read_depth_float32(path: Path, width: int, height: int) -> np.ndarray:
     expected = width * height
     data = np.fromfile(path, dtype="<f4", count=expected)
@@ -437,6 +460,20 @@ def init_sh_model_from_points(
     )
 
 
+def make_export_geometry_model(model: ScannerPointsSHModel, training_geometry_scale: float) -> ScannerPointsSHModel:
+    if training_geometry_scale == 1.0:
+        return model
+    log_scale_offset = mx.array(np.log(float(training_geometry_scale)), dtype=mx.float32)
+    return ScannerPointsSHModel.from_arrays(
+        model.means / float(training_geometry_scale),
+        model.quats,
+        model.log_scales - log_scale_offset,
+        model.features_dc,
+        model.features_rest,
+        model.opacity_logits,
+    )
+
+
 def knn_log_scales_from_points(points: np.ndarray, init_scale: float = 1.0) -> np.ndarray:
     points = np.asarray(points, dtype=np.float32)
     if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
@@ -603,13 +640,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ssim-lambda", type=float, default=0.2)
     parser.add_argument("--ssim-window-size", type=int, default=11)
     parser.add_argument("--means-lr", type=float, default=1.6e-4)
-    parser.add_argument("--scales-lr", type=float, default=6.0e-4)
+    parser.add_argument("--scales-lr", type=float, default=234.0e-6)
     parser.add_argument("--opacities-lr", type=float, default=5.0e-2)
     parser.add_argument("--quats-lr", type=float, default=1.0e-3)
     parser.add_argument("--sh0-lr", type=float, default=2.5e-3)
     parser.add_argument("--shn-lr", type=float, default=2.5e-3 / 20.0)
     parser.add_argument("--sh-degree", type=int, default=3)
-    parser.add_argument("--sh-degree-interval", type=int, default=1000)
+    parser.add_argument("--sh-degree-interval", type=int, default=500)
     parser.add_argument("--global-scale", type=float, default=1.0)
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument("--step-image-interval", type=int, default=0)
@@ -702,14 +739,14 @@ def main() -> None:
         target_points=args.target_points,
         seed=args.seed,
     )
-    cameras = scene.cameras
+    cameras = scale_camera_geometry(scene.cameras, TRAINING_GEOMETRY_SCALE)
     eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
     eval_frames = (
         select_frames(load_scanapp_frames(args.data), args.eval_max_frames, eval_frame_step, args.eval_start_index)
         if args.eval_max_frames > 0
         else []
     )
-    eval_cameras = load_scanapp_cameras(eval_frames, width, height) if eval_frames else []
+    eval_cameras = scale_camera_geometry(load_scanapp_cameras(eval_frames, width, height), TRAINING_GEOMETRY_SCALE) if eval_frames else []
     targets = [mx.array(load_target(camera.image_path, width, height)[None, ...], dtype=mx.float32) for camera in cameras]
     eval_targets = [mx.array(load_target(camera.image_path, width, height)[None, ...], dtype=mx.float32) for camera in eval_cameras]
     log(
@@ -720,12 +757,14 @@ def main() -> None:
 
     points, colors, raw_point_count = scene.points, scene.colors, scene.raw_point_count
     points, colors = append_random_gaussians(points, colors, args.num_random_gaussians, args.seed + 1009, args.random_gaussian_bounds_scale)
+    output_point_diagnostics = points_extent_diagnostics(points)
     log(
         "initializing KNN log scales "
         f"points={points.shape[0]} raw_depth_points={raw_point_count} "
         f"target_points={args.target_points} init_scale={args.init_scale}"
     )
     log_scales = knn_log_scales_from_points(points, args.init_scale)
+    points = (points * float(TRAINING_GEOMETRY_SCALE)).astype(np.float32)
     point_diagnostics = points_extent_diagnostics(points)
     resolved_scene_scale = float(scene.scene_scale * 1.1 * args.global_scale)
     means_lr = float(args.means_lr * resolved_scene_scale)
@@ -824,6 +863,13 @@ def main() -> None:
     last_loss = None
     last_viewspace_grad = None
     last_viewspace_grad_norm = None
+    final_update_only_start_step = max(1, int(args.steps) - FINAL_UPDATE_ONLY_STEPS + 1)
+    final_update_only_skipped_refine_steps = 0
+    log(
+        "final update-only window "
+        f"start_step={final_update_only_start_step} steps={FINAL_UPDATE_ONLY_STEPS} "
+        "skips_refine_clone_split_prune_reset=True"
+    )
     log(f"entering training loop steps={args.steps} batch_size={args.batch_size}")
     for step in range(1, args.steps + 1):
         latest_lrs = {}
@@ -873,9 +919,13 @@ def main() -> None:
         model.quats = normalize_quats(model.quats)
         mx.eval(model.means, model.quats, model.log_scales, model.features_dc, model.features_rest, model.opacity_logits)
 
-        if strategy.config.enabled:
+        update_only_step = step >= final_update_only_start_step
+        if strategy.config.enabled and not update_only_step:
             strategy.update_state(d_viewspace, strategy_radii, width=width, height=height, n_cameras=len(batch_ids))
-        strategy.after_optimizer_step(step, model, optimizers, "sh")
+        if update_only_step:
+            final_update_only_skipped_refine_steps += 1
+        else:
+            strategy.after_optimizer_step(step, model, optimizers, "sh")
 
         if step == 1 or step == args.steps or step % args.log_interval == 0:
             log(
@@ -922,8 +972,9 @@ def main() -> None:
         raise AssertionError("ScanApp depth training expected nonzero viewspace_points gradient")
 
     out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanapp_depth.spz"
-    spz_diagnostics = spz_export_diagnostics(model, "sh", active_sh_degree, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
-    exported_gaussians = export_trained_spz(out_spz, model, "sh", active_sh_degree, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
+    export_model = make_export_geometry_model(model, TRAINING_GEOMETRY_SCALE)
+    spz_diagnostics = spz_export_diagnostics(export_model, "sh", active_sh_degree, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
+    exported_gaussians = export_trained_spz(out_spz, export_model, "sh", active_sh_degree, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
     spz_size = out_spz.stat().st_size
     if spz_size <= 0:
         raise AssertionError(f"SPZ output is empty: {out_spz}")
@@ -997,13 +1048,35 @@ def main() -> None:
         "mlx_previous_cache_limit_bytes": int(previous_cache_limit),
         "scene_scale": float(scene.scene_scale),
         "resolved_scene_scale": float(resolved_scene_scale),
+        "final_update_only": {
+            "enabled": True,
+            "last_steps": int(FINAL_UPDATE_ONLY_STEPS),
+            "start_step": int(final_update_only_start_step),
+            "end_step": int(args.steps),
+            "skipped_refine_steps": int(final_update_only_skipped_refine_steps),
+            "skips_update_state": True,
+            "skips_after_optimizer_step": True,
+            "skips_clone_split_prune_opacity_reset": True,
+        },
+        "training_geometry_scale": {
+            "enabled": bool(TRAINING_GEOMETRY_SCALE != 1.0),
+            "scale": float(TRAINING_GEOMETRY_SCALE),
+            "export_inverse_scale": float(1.0 / TRAINING_GEOMETRY_SCALE),
+            "points_scaled_before_training": True,
+            "camera_translations_scaled_before_training": True,
+            "scene_scale_scaled_for_refine": False,
+            "initial_log_scales_computed_before_geometry_scale": True,
+            "export_means_divided_by_scale": True,
+            "export_log_scales_shift": float(-np.log(float(TRAINING_GEOMETRY_SCALE))),
+        },
         "initialization": {
             "type": "scanapp_depth_reconstruction",
             "scale_rule": "average distance to 3 nearest neighbors times init_scale",
             "sampling_rule": "all valid depth pixels are reconstructed first, then globally sampled to target_point_count",
             "init_scale": float(args.init_scale),
             "opacity": float(args.opacity),
-            "point_extent": point_diagnostics,
+            "point_extent": output_point_diagnostics,
+            "training_point_extent": point_diagnostics,
             "log_scale_min": float(log_scales.min()),
             "log_scale_mean": float(log_scales.mean()),
             "log_scale_max": float(log_scales.max()),
@@ -1047,7 +1120,7 @@ def main() -> None:
     }
     out_model_npz = args.out_model_npz if args.out_model_npz is not None else args.out_dir / "trained_model_params.npz"
     summary["model_npz"] = str(out_model_npz)
-    save_model_parameters_npz(out_model_npz, model, "sh", active_sh_degree, args.sh_degree, summary)
+    save_model_parameters_npz(out_model_npz, export_model, "sh", active_sh_degree, args.sh_degree, summary)
     (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     out_spz.with_suffix(".json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
