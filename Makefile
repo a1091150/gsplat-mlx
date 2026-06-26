@@ -42,17 +42,19 @@ SCANNER_POINTS_TRAIN2_SPZ_SCALE_MODE ?= direct
 SCANNER_POINTS_TRAIN2_SPZ_ROTATION_MODE ?= position_axis
 SCANNER_POINTS_TRAIN2_SPZ_QUAT_ORDER ?= xyzw
 SCANNER_POINTS_TRAIN2_SPZ_COLOR_MODE ?= sh
-
-SCANAPP_DEPTH_DATA ?= /Users/yangdunfu/Documents/iOSProject/ScanProject/20260618_154636
+SCANAPP_DEPTH_DATA ?= /Users/yangdunfu/Documents/gsplat_core/outputs/scanapp_video_20260625_144517_compat
+# SCANAPP_DEPTH_DATA ?= /Users/yangdunfu/Documents/iOSProject/ScanProject/20260618_154636
 SCANAPP_DEPTH_OUT ?= outputs/scanapp_depth_train
 SCANAPP_DEPTH_SPZ ?= $(SCANAPP_DEPTH_OUT)/trained_scanapp_depth.spz
 SCANAPP_DEPTH_MODEL_NPZ ?= $(SCANAPP_DEPTH_OUT)/trained_model_params.npz
 SCANAPP_DEPTH_WIDTH ?= 512
 SCANAPP_DEPTH_HEIGHT ?= 512
+SCANAPP_DEPTH_RESOLUTION_SCALES ?= 1/8,1/4
+SCANAPP_DEPTH_FINAL_UPDATE_ROUNDS ?= 1
 SCANAPP_DEPTH_TARGET_POINTS ?= 262144
 SCANAPP_DEPTH_MAX_FRAMES ?= 0
 SCANAPP_DEPTH_FRAME_STEP ?= 1
-SCANAPP_DEPTH_START_INDEX ?= 0
+SCANAPP_DEPTH_START_INDEX ?= 10
 SCANAPP_DEPTH_EVAL_FRAMES ?= 0
 SCANAPP_DEPTH_EVAL_FRAME_STEP ?= $(SCANAPP_DEPTH_FRAME_STEP)
 SCANAPP_DEPTH_EVAL_START_INDEX ?= 0
@@ -63,6 +65,11 @@ SCANAPP_DEPTH_LOG_INTERVAL ?= $(COLMAP_360_LOG_INTERVAL)
 SCANAPP_DEPTH_STEP_IMAGE_INTERVAL ?= 10
 SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB ?= $(COLMAP_360_MLX_CACHE_LIMIT_GB)
 SCANAPP_DEPTH_GLOBAL_SCALE ?= 0.2
+SCANAPP_DEPTH_REFINE_START_RATIO ?= 0.2
+SCANAPP_DEPTH_REFINE_STOP_RATIO ?= 0.9
+SCANAPP_DEPTH_REFINE_EVERY_RATIO ?= 0.04
+SCANAPP_DEPTH_REFINE_RESET_RATIOS ?= 0.6
+SCANAPP_DEPTH_SH_DEGREE_INTERVAL_RATIO ?= 0.2
 SCANAPP_DEPTH_SPZ_SCALE_MODE ?= direct
 SCANAPP_DEPTH_SPZ_ROTATION_MODE ?= position_axis
 SCANAPP_DEPTH_SPZ_QUAT_ORDER ?= xyzw
@@ -193,7 +200,7 @@ COLMAP_360_SPZ ?= $(COLMAP_360_OUT)/trained_360_$(COLMAP_360_SCENE).spz
 COLMAP_360_MODEL_NPZ ?= $(COLMAP_360_OUT)/trained_model_params.npz
 COLMAP_360_LOG_INTERVAL ?= 100
 COLMAP_360_STEP_IMAGE_INTERVAL ?= 0
-COLMAP_360_MLX_CACHE_LIMIT_GB ?= 24
+COLMAP_360_MLX_CACHE_LIMIT_GB ?= 16
 
 SOFA_DATA ?= datasets/B075X65R3X
 SOFA_WIDTH ?= 512
@@ -355,7 +362,7 @@ codex-scanapp-video-prepare:
 	conda run -n $(CONDA_ENV) python scripts/test/prepare_scanapp_video_dataset.py --data "$(SCANAPP_VIDEO_DATA)" --out-dir "$(SCANAPP_VIDEO_PREP_OUT)" --ffmpeg-bin "$(SCANAPP_VIDEO_FFMPEG)" --image-extension $(SCANAPP_VIDEO_IMAGE_EXTENSION) --jpeg-quality $(SCANAPP_VIDEO_JPEG_QUALITY) --max-frames $(SCANAPP_VIDEO_MAX_FRAMES) --frame-step $(SCANAPP_VIDEO_FRAME_STEP) --start-index $(SCANAPP_VIDEO_START_INDEX) $(SCANAPP_VIDEO_COPY_DEPTH) $(SCANAPP_VIDEO_PREP_OVERWRITE)
 
 codex-scanapp-depth-train-spz:
-	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_OUT)" --out-spz "$(SCANAPP_DEPTH_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --frame-sampling $(SCANAPP_DEPTH_FRAME_SAMPLING) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
+	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_OUT)" --out-spz "$(SCANAPP_DEPTH_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --resolution-scales "$(SCANAPP_DEPTH_RESOLUTION_SCALES)" --final-update-rounds $(SCANAPP_DEPTH_FINAL_UPDATE_ROUNDS) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --frame-sampling $(SCANAPP_DEPTH_FRAME_SAMPLING) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --refine-start-ratio $(SCANAPP_DEPTH_REFINE_START_RATIO) --refine-stop-ratio $(SCANAPP_DEPTH_REFINE_STOP_RATIO) --refine-every-ratio $(SCANAPP_DEPTH_REFINE_EVERY_RATIO) --refine-reset-ratios "$(SCANAPP_DEPTH_REFINE_RESET_RATIOS)" --sh-degree-interval-ratio $(SCANAPP_DEPTH_SH_DEGREE_INTERVAL_RATIO) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled
 
 codex-scanapp-depth-masked-train-spz:
 	conda run -n $(CONDA_ENV) python scripts/test/train_scanapp_depth_masked_multiview_3dgs_mlx.py --data "$(SCANAPP_DEPTH_DATA)" --out-dir "$(SCANAPP_DEPTH_MASKED_OUT)" --out-spz "$(SCANAPP_DEPTH_MASKED_SPZ)" --out-model-npz "$(SCANAPP_DEPTH_MASKED_MODEL_NPZ)" --width $(SCANAPP_DEPTH_WIDTH) --height $(SCANAPP_DEPTH_HEIGHT) --target-points $(SCANAPP_DEPTH_TARGET_POINTS) --max-frames $(SCANAPP_DEPTH_MAX_FRAMES) --frame-step $(SCANAPP_DEPTH_FRAME_STEP) --start-index $(SCANAPP_DEPTH_START_INDEX) --eval-max-frames $(SCANAPP_DEPTH_EVAL_FRAMES) --eval-frame-step $(SCANAPP_DEPTH_EVAL_FRAME_STEP) --eval-start-index $(SCANAPP_DEPTH_EVAL_START_INDEX) --steps $(SCANAPP_DEPTH_STEPS) --batch-size $(SCANAPP_DEPTH_BATCH_SIZE) --log-interval $(SCANAPP_DEPTH_LOG_INTERVAL) --step-image-interval $(SCANAPP_DEPTH_STEP_IMAGE_INTERVAL) --mlx-cache-limit-gb $(SCANAPP_DEPTH_MLX_CACHE_LIMIT_GB) --global-scale $(SCANAPP_DEPTH_GLOBAL_SCALE) --mask-min-depth $(SCANAPP_DEPTH_MASK_MIN) --mask-max-depth $(SCANAPP_DEPTH_MASK_MAX) --mask-min-confidence $(SCANAPP_DEPTH_MASK_MIN_CONFIDENCE) --spz-scale-mode $(SCANAPP_DEPTH_SPZ_SCALE_MODE) --spz-rotation-mode $(SCANAPP_DEPTH_SPZ_ROTATION_MODE) --spz-quat-order $(SCANAPP_DEPTH_SPZ_QUAT_ORDER) --spz-color-mode $(SCANAPP_DEPTH_SPZ_COLOR_MODE) --refine-enabled

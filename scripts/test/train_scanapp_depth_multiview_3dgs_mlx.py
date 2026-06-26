@@ -612,14 +612,81 @@ def validate_positive(name: str, value: float) -> None:
         raise ValueError(f"{name} must be positive")
 
 
+def parse_scale_token(token: str) -> float:
+    token = token.strip()
+    if not token:
+        raise ValueError("empty resolution scale token")
+    if "/" in token:
+        numerator, denominator = token.split("/", 1)
+        value = float(numerator) / float(denominator)
+    else:
+        value = float(token)
+    if value <= 0.0:
+        raise ValueError(f"resolution scale must be positive: {token}")
+    return value
+
+
+def parse_scale_list(value: str) -> list[float]:
+    scales = [parse_scale_token(token) for token in value.split(",") if token.strip()]
+    if not scales:
+        raise ValueError("--resolution-scales must contain at least one scale")
+    return scales
+
+
+def parse_ratio_list(value: str) -> list[float]:
+    if not value.strip():
+        return []
+    ratios = [parse_scale_token(token) for token in value.split(",") if token.strip()]
+    for ratio in ratios:
+        if ratio <= 0.0 or ratio >= 1.0:
+            raise ValueError("--refine-reset-ratios values must be in (0, 1)")
+    return ratios
+
+
+def scaled_resolution(raw_width: int, raw_height: int, scale: float) -> tuple[int, int]:
+    return max(1, int(round(raw_width * scale))), max(1, int(round(raw_height * scale)))
+
+
+def pingpong_order(frame_count: int) -> list[int]:
+    if frame_count <= 0:
+        raise ValueError("frame_count must be positive")
+    if frame_count == 1:
+        return [0]
+    return list(range(frame_count)) + list(range(frame_count - 2, 0, -1))
+
+
+def pingpong_batches(order: list[int], batch_size: int) -> list[list[int]]:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    return [order[start : start + batch_size] for start in range(0, len(order), batch_size)]
+
+
+def step_from_ratio(total_steps: int, ratio: float, *, minimum: int = 1) -> int:
+    if ratio <= 0.0 or ratio >= 1.0:
+        raise ValueError("ratio must be in (0, 1)")
+    return max(minimum, min(total_steps, int(round(total_steps * ratio))))
+
+
+def load_round_cameras_targets(
+    frames: list[ScanAppFrame],
+    width: int,
+    height: int,
+) -> tuple[list[ScanAppCamera], list[mx.array]]:
+    cameras = scale_camera_geometry(load_scanapp_cameras(frames, width, height), TRAINING_GEOMETRY_SCALE)
+    targets = [mx.array(load_target(camera.image_path, width, height)[None, ...], dtype=mx.float32) for camera in cameras]
+    return cameras, targets
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("/Users/yangdunfu/Documents/iOSProject/ScanProject/20260618_154636"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/scanapp_depth_train"))
     parser.add_argument("--out-spz", type=Path, default=None)
     parser.add_argument("--out-model-npz", type=Path, default=None)
-    parser.add_argument("--width", type=int, default=512)
-    parser.add_argument("--height", type=int, default=512)
+    parser.add_argument("--width", type=int, default=0)
+    parser.add_argument("--height", type=int, default=0)
+    parser.add_argument("--resolution-scales", type=str, default="1/4,1/3,1/3")
+    parser.add_argument("--final-update-rounds", type=int, default=1)
     parser.add_argument("--target-points", type=int, default=262_144)
     parser.add_argument("--tile-size", type=int, default=16)
     parser.add_argument("--max-frames", type=int, default=0)
@@ -647,6 +714,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shn-lr", type=float, default=2.5e-3 / 20.0)
     parser.add_argument("--sh-degree", type=int, default=3)
     parser.add_argument("--sh-degree-interval", type=int, default=500)
+    parser.add_argument("--sh-degree-interval-ratio", type=float, default=0.2)
     parser.add_argument("--global-scale", type=float, default=1.0)
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument("--step-image-interval", type=int, default=0)
@@ -665,6 +733,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refine-reset-every", type=int, default=3000)
     parser.add_argument("--refine-every", type=int, default=100)
     parser.add_argument("--refine-pause-after-reset", type=int, default=0)
+    parser.add_argument("--refine-start-ratio", type=float, default=0.2)
+    parser.add_argument("--refine-stop-ratio", type=float, default=0.9)
+    parser.add_argument("--refine-every-ratio", type=float, default=0.04)
+    parser.add_argument("--refine-reset-ratios", type=str, default="0.6")
     parser.add_argument("--spz-scale-mode", choices=("direct", "scanner_axis"), default="direct")
     parser.add_argument("--spz-rotation-mode", choices=("direct", "position_axis", "fastgs_conjugate", "position_conjugate"), default="position_axis")
     parser.add_argument("--spz-quat-order", choices=("wxyz", "xyzw"), default="xyzw")
@@ -672,7 +744,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def legacy_single_loop_main() -> None:
     args = parse_args()
     if args.mlx_cache_limit_gb < 0.0:
         raise ValueError("--mlx-cache-limit-gb must be nonnegative")
@@ -933,7 +1005,7 @@ def main() -> None:
                 f"sh={active_sh_degree} loss={last_loss:.8f} "
                 f"means_lr={latest_lrs['means']:.8g} viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
             )
-        if args.step_image_interval > 0 and step % args.step_image_interval == 0:
+        if args.step_image_interval > 0 and step % args.step_image_interval == 0 and False:
             step_image_count += 1
             step_frame_index = batch_ids[0]
             image = render_step_compare(
@@ -1128,6 +1200,646 @@ def main() -> None:
         "ScanApp depth multi-view training ok "
         f"initial_mean_loss={initial_mean_loss:.8f} final_mean_loss={final_mean_loss:.8f} "
         f"last_viewspace_grad_norm={last_viewspace_grad_norm:.8f} "
+        f"spz={out_spz} bytes={spz_size} output_dir={args.out_dir}"
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    if args.mlx_cache_limit_gb < 0.0:
+        raise ValueError("--mlx-cache-limit-gb must be nonnegative")
+    cache_limit_bytes = int(args.mlx_cache_limit_gb * 1024**3)
+    previous_cache_limit = mx.set_cache_limit(cache_limit_bytes)
+    log(
+        "mlx cache limit configured "
+        f"current={cache_limit_bytes} bytes ({args.mlx_cache_limit_gb:.2f} GiB) "
+        f"previous={previous_cache_limit} bytes"
+    )
+    if args.sh_degree < 0 or args.sh_degree > MAX_SUPPORTED_SH_DEGREE:
+        raise ValueError(f"--sh-degree must be in [0, {MAX_SUPPORTED_SH_DEGREE}]")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
+    if args.frame_step <= 0:
+        raise ValueError("--frame-step must be positive")
+    if args.eval_frame_step is not None and args.eval_frame_step <= 0:
+        raise ValueError("--eval-frame-step must be positive")
+    if args.target_points <= 0:
+        raise ValueError("--target-points must be positive")
+    if args.final_update_rounds < 0:
+        raise ValueError("--final-update-rounds must be nonnegative")
+    for name, value in [
+        ("--init-scale", args.init_scale),
+        ("--opacity", args.opacity),
+        ("--means-lr", args.means_lr),
+        ("--scales-lr", args.scales_lr),
+        ("--opacities-lr", args.opacities_lr),
+        ("--quats-lr", args.quats_lr),
+        ("--sh0-lr", args.sh0_lr),
+        ("--shn-lr", args.shn_lr),
+    ]:
+        validate_positive(name, value)
+    for name, value in [
+        ("--refine-start-ratio", args.refine_start_ratio),
+        ("--refine-stop-ratio", args.refine_stop_ratio),
+        ("--refine-every-ratio", args.refine_every_ratio),
+        ("--sh-degree-interval-ratio", args.sh_degree_interval_ratio),
+    ]:
+        if value <= 0.0 or value >= 1.0:
+            raise ValueError(f"{name} must be in (0, 1)")
+    if args.refine_stop_ratio <= args.refine_start_ratio:
+        raise ValueError("--refine-stop-ratio must be greater than --refine-start-ratio")
+
+    resolution_scales = parse_scale_list(args.resolution_scales)
+    reset_ratios = parse_ratio_list(args.refine_reset_ratios)
+    selected_frames = select_frames(load_scanapp_frames(args.data), args.max_frames, args.frame_step, args.start_index)
+    raw_width = int(selected_frames[0].width)
+    raw_height = int(selected_frames[0].height)
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    step_image_dir = args.out_dir / "step"
+    step_image_count = 0
+    if args.step_image_interval > 0:
+        step_image_dir.mkdir(parents=True, exist_ok=True)
+
+    log(
+        "loading ScanApp depth scene "
+        f"data={args.data} raw_size={raw_width}x{raw_height} "
+        f"target_points={args.target_points}"
+    )
+    scene = load_scanapp_scene(
+        args.data,
+        width=raw_width,
+        height=raw_height,
+        max_frames=args.max_frames,
+        frame_step=args.frame_step,
+        start_index=args.start_index,
+        target_points=args.target_points,
+        seed=args.seed,
+    )
+    frames = scene.frames
+    frame_count = len(frames)
+    order = pingpong_order(frame_count)
+    order_batches = pingpong_batches(order, args.batch_size)
+    pingpong_order_length = len(order)
+    epoch_steps = len(order_batches)
+    total_rounds = len(resolution_scales) + int(args.final_update_rounds)
+    total_steps = epoch_steps * total_rounds
+    eval_frame_step = args.frame_step if args.eval_frame_step is None else args.eval_frame_step
+    eval_frames = (
+        select_frames(load_scanapp_frames(args.data), args.eval_max_frames, eval_frame_step, args.eval_start_index)
+        if args.eval_max_frames > 0
+        else []
+    )
+
+    points, colors, raw_point_count = scene.points, scene.colors, scene.raw_point_count
+    points, colors = append_random_gaussians(points, colors, args.num_random_gaussians, args.seed + 1009, args.random_gaussian_bounds_scale)
+    output_point_diagnostics = points_extent_diagnostics(points)
+    log(
+        "initializing KNN log scales "
+        f"points={points.shape[0]} raw_depth_points={raw_point_count} "
+        f"target_points={args.target_points} init_scale={args.init_scale}"
+    )
+    log_scales = knn_log_scales_from_points(points, args.init_scale)
+    points = (points * float(TRAINING_GEOMETRY_SCALE)).astype(np.float32)
+    point_diagnostics = points_extent_diagnostics(points)
+    resolved_scene_scale = float(scene.scene_scale * 1.1 * args.global_scale)
+    means_lr = float(args.means_lr * resolved_scene_scale)
+    means_lr_final = means_lr * 0.01
+
+    log(
+        "initializing SH model "
+        f"gaussians={points.shape[0]} sh_degree={args.sh_degree} "
+        f"opacity={args.opacity}"
+    )
+    model = init_sh_model_from_points(points, colors, log_scales, args.opacity, args.sh_degree)
+
+    global_step = 0
+    step_image_global_count = 0
+    last_loss = None
+    last_viewspace_grad = None
+    last_viewspace_grad_norm = None
+    first_round_initial_stats = None
+    final_round_initial_stats = None
+    final_round_targets = None
+    final_round_cameras = None
+    training_rounds: list[dict] = []
+    sh_degree_events: list[dict] = []
+
+    def make_optimizers_and_schedules(schedule_steps: int) -> tuple[dict[str, Adam], dict]:
+        optimizers = {
+            "means": Adam(learning_rate=means_lr),
+            "quats": Adam(learning_rate=args.quats_lr),
+            "log_scales": Adam(learning_rate=args.scales_lr),
+            "features_dc": Adam(learning_rate=args.sh0_lr),
+            "features_rest": Adam(learning_rate=args.shn_lr),
+            "opacity_logits": Adam(learning_rate=args.opacities_lr),
+        }
+        schedules = {
+            "means": make_lr_schedule(means_lr, means_lr_final, 1.0, schedule_steps),
+            "quats": make_lr_schedule(args.quats_lr, None, 1.0, schedule_steps),
+            "log_scales": make_lr_schedule(args.scales_lr, None, 1.0, schedule_steps),
+            "features_dc": make_lr_schedule(args.sh0_lr, None, 1.0, schedule_steps),
+            "features_rest": make_lr_schedule(args.shn_lr, None, 1.0, schedule_steps),
+            "opacity_logits": make_lr_schedule(args.opacities_lr, None, 1.0, schedule_steps),
+        }
+        return optimizers, schedules
+
+    optimizers, lr_schedules = make_optimizers_and_schedules(total_steps)
+
+    def make_strategy(round_steps: int) -> tuple[ScannerDefaultStrategyRuntime, dict]:
+        refine_start = max(0, min(round_steps - 1, int(round(round_steps * args.refine_start_ratio))))
+        refine_stop = max(refine_start + 1, min(round_steps + 1, int(round(round_steps * args.refine_stop_ratio))))
+        refine_every = max(1, int(round(round_steps * args.refine_every_ratio)))
+        sh_interval = max(1, int(round(round_steps * args.sh_degree_interval_ratio)))
+        reset_steps = sorted({step_from_ratio(round_steps, ratio) for ratio in reset_ratios})
+        config = ScannerDefaultStrategyConfig(
+            enabled=args.refine_enabled,
+            prune_opa=args.refine_prune_opa,
+            grow_grad2d=args.refine_grow_grad2d,
+            grow_scale3d=args.refine_grow_scale3d,
+            grow_scale2d=args.refine_grow_scale2d,
+            prune_scale3d=args.refine_prune_scale3d,
+            prune_scale2d=args.refine_prune_scale2d,
+            refine_scale2d_stop_iter=args.refine_scale2d_stop_iter,
+            refine_start_iter=refine_start,
+            refine_stop_iter=refine_stop,
+            reset_every=round_steps + 1,
+            opacity_reset_steps=reset_steps,
+            refine_every=refine_every,
+            pause_refine_after_reset=args.refine_pause_after_reset,
+            scene_scale=resolved_scene_scale,
+            absgrad=False,
+            revised_opacity=False,
+        )
+        details = {
+            "refine_start_step": int(refine_start),
+            "refine_stop_step": int(refine_stop),
+            "refine_every": int(refine_every),
+            "opacity_reset_steps": [int(item) for item in reset_steps],
+            "sh_degree_interval": int(sh_interval),
+            "ratios": {
+                "refine_start": float(args.refine_start_ratio),
+                "refine_stop": float(args.refine_stop_ratio),
+                "refine_every": float(args.refine_every_ratio),
+                "opacity_reset": [float(item) for item in reset_ratios],
+                "sh_degree_interval": float(args.sh_degree_interval_ratio),
+            },
+        }
+        return ScannerDefaultStrategyRuntime(config, initial_gaussians=model.means.shape[1]), details
+
+    def run_round(
+        *,
+        round_index: int,
+        phase: str,
+        scale: float,
+        enable_refine: bool,
+    ) -> dict:
+        nonlocal global_step
+        nonlocal step_image_count
+        nonlocal step_image_global_count
+        nonlocal last_loss
+        nonlocal last_viewspace_grad
+        nonlocal last_viewspace_grad_norm
+        nonlocal first_round_initial_stats
+        nonlocal final_round_initial_stats
+        nonlocal final_round_targets
+        nonlocal final_round_cameras
+
+        width, height = scaled_resolution(raw_width, raw_height, scale)
+        cameras, targets = load_round_cameras_targets(frames, width, height)
+        active_sh_degree = gsplat_active_sh_degree(0, args.sh_degree, 1)
+        initial_stats = evaluate_frames(
+            model,
+            cameras,
+            targets,
+            width,
+            height,
+            args.tile_size,
+            active_sh_degree,
+            args.ssim_lambda,
+            args.ssim_window_size,
+        )
+        if first_round_initial_stats is None:
+            first_round_initial_stats = initial_stats
+        final_round_initial_stats = initial_stats
+        final_round_targets = targets
+        final_round_cameras = cameras
+        round_initial_mean_loss = mean_loss(initial_stats)
+        strategy, schedule_details = make_strategy(epoch_steps)
+        sh_interval = int(schedule_details["sh_degree_interval"])
+        round_sh_events = [{"local_step": 0, "global_step": int(global_step), "active_sh_degree": int(active_sh_degree)}]
+        round_lr_history: dict[str, list[dict]] = {name: [] for name in lr_schedules}
+
+        def sh_loss_fn(
+            means: mx.array,
+            quats: mx.array,
+            log_scales_: mx.array,
+            features_dc: mx.array,
+            features_rest: mx.array,
+            opacity_logits: mx.array,
+            viewspace_points: mx.array,
+            viewmats: mx.array,
+            ks: mx.array,
+            target: mx.array,
+        ) -> mx.array:
+            local = ScannerPointsSHModel.from_arrays(means, quats, log_scales_, features_dc, features_rest, opacity_logits)
+            losses = []
+            radii = []
+            batch = int(viewmats.shape[1])
+            for idx in range(batch):
+                render = render_sh_model(
+                    local,
+                    viewspace_points[:, idx : idx + 1],
+                    viewmats[:, idx : idx + 1],
+                    ks[:, idx : idx + 1],
+                    width,
+                    height,
+                    args.tile_size,
+                    active_sh_degree,
+                )
+                losses.append(loss_components(render["render_colors"], target[idx : idx + 1], args.ssim_lambda, args.ssim_window_size)["loss"])
+                radii.append(render["radii"])
+            return mx.mean(mx.stack(losses)), mx.concatenate(radii, axis=1)
+
+        grad_fn = mx.value_and_grad(sh_loss_fn, argnums=(0, 1, 2, 3, 4, 5, 6))
+        skipped_refine_steps = 0
+        round_start_global_step = global_step + 1
+        log(
+            f"entering {phase} round={round_index} scale={scale:.6g} "
+            f"size={width}x{height} steps={epoch_steps} refine={enable_refine}"
+        )
+        for local_step, batch_ids in enumerate(order_batches, start=1):
+            global_step += 1
+            latest_lrs = {}
+            for name, schedule in lr_schedules.items():
+                lr = lr_for_step(schedule, global_step)
+                optimizers[name].learning_rate = lr
+                schedule["latest"] = float(lr)
+                latest_lrs[name] = float(lr)
+            if global_step == 1 or global_step == total_steps or global_step % args.log_interval == 0:
+                for name, schedule in lr_schedules.items():
+                    entry = {
+                        "round": int(round_index),
+                        "phase": phase,
+                        "local_step": int(local_step),
+                        "global_step": int(global_step),
+                        "lr": float(schedule["latest"]),
+                    }
+                    schedule["history"].append(entry)
+                    round_lr_history[name].append(entry)
+
+            next_active_sh_degree = gsplat_active_sh_degree(local_step, args.sh_degree, sh_interval)
+            if next_active_sh_degree != active_sh_degree:
+                active_sh_degree = next_active_sh_degree
+                event = {"local_step": int(local_step), "global_step": int(global_step), "active_sh_degree": int(active_sh_degree)}
+                round_sh_events.append(event)
+                sh_degree_events.append({"round": int(round_index), "phase": phase, **event})
+
+            batch_frame_indices = [int(cameras[idx].index) for idx in batch_ids]
+            target = target_batch_array(targets, batch_ids)
+            viewmats, ks = camera_batch_arrays(cameras, batch_ids)
+            viewspace_points = mx.zeros((1, len(batch_ids), model.means.shape[1], 2), dtype=mx.float32)
+            (loss, strategy_radii), grads = grad_fn(
+                model.means,
+                model.quats,
+                model.log_scales,
+                model.features_dc,
+                model.features_rest,
+                model.opacity_logits,
+                viewspace_points,
+                viewmats,
+                ks,
+                target,
+            )
+            d_means, d_quats, d_log_scales, d_features_dc, d_features_rest, d_opacity_logits, d_viewspace = grads
+            mx.eval(loss, d_viewspace)
+            last_loss = float(np.asarray(loss))
+            last_viewspace_grad = d_viewspace
+            last_viewspace_grad_norm = float(np.linalg.norm(np.asarray(d_viewspace)))
+
+            optimizers["means"].update(model, {"means": d_means})
+            optimizers["quats"].update(model, {"quats": d_quats})
+            optimizers["log_scales"].update(model, {"log_scales": d_log_scales})
+            optimizers["features_dc"].update(model, {"features_dc": d_features_dc})
+            optimizers["features_rest"].update(model, {"features_rest": d_features_rest})
+            optimizers["opacity_logits"].update(model, {"opacity_logits": d_opacity_logits})
+            model.quats = normalize_quats(model.quats)
+            mx.eval(model.means, model.quats, model.log_scales, model.features_dc, model.features_rest, model.opacity_logits)
+
+            if enable_refine and strategy.config.enabled:
+                strategy.update_state(d_viewspace, strategy_radii, width=width, height=height, n_cameras=len(batch_ids))
+                strategy.after_optimizer_step(local_step, model, optimizers, "sh")
+            else:
+                skipped_refine_steps += 1
+
+            if local_step == 1 or local_step == epoch_steps or global_step % args.log_interval == 0:
+                log(
+                    f"global_step={global_step:05d} round={round_index} local_step={local_step:05d} "
+                    f"phase={phase} frames={batch_frame_indices} sh={active_sh_degree} "
+                    f"loss={last_loss:.8f} means_lr={latest_lrs['means']:.8g} "
+                    f"viewspace_grad_norm={last_viewspace_grad_norm:.8f}"
+                )
+            if args.step_image_interval > 0 and global_step % args.step_image_interval == 0:
+                step_image_count += 1
+                step_image_global_count += 1
+                step_frame_index = batch_ids[0]
+                image = render_step_compare(
+                    model,
+                    cameras[step_frame_index],
+                    targets[step_frame_index],
+                    initial_stats[step_frame_index]["image"],
+                    width,
+                    height,
+                    args.tile_size,
+                    active_sh_degree,
+                )
+                out_path = step_image_dir / (
+                    f"compare_step_{global_step:06d}_round_{round_index:02d}_"
+                    f"frame_{cameras[step_frame_index].index:05d}.png"
+                )
+                write_png(out_path, image)
+                log(f"wrote step image step={global_step} path={out_path}")
+
+        return {
+            "round": int(round_index),
+            "phase": phase,
+            "scale": float(scale),
+            "width": int(width),
+            "height": int(height),
+            "start_global_step": int(round_start_global_step),
+            "end_global_step": int(global_step),
+            "steps": int(epoch_steps),
+            "pingpong_order_length": int(pingpong_order_length),
+            "batch_size": int(args.batch_size),
+            "initial_mean_loss": float(round_initial_mean_loss),
+            "last_loss": float(last_loss) if last_loss is not None else None,
+            "refine_enabled": bool(enable_refine and args.refine_enabled),
+            "update_only": bool(not enable_refine),
+            "skipped_refine_steps": int(skipped_refine_steps),
+            "schedule": schedule_details,
+            "sh_degree_events": round_sh_events,
+            "learning_rate_history": round_lr_history,
+            "refinement_strategy": strategy.summary(),
+        }
+
+    round_index = 0
+    for scale in resolution_scales:
+        round_index += 1
+        training_rounds.append(run_round(round_index=round_index, phase="refine", scale=scale, enable_refine=True))
+    for _ in range(args.final_update_rounds):
+        round_index += 1
+        training_rounds.append(run_round(round_index=round_index, phase="final_update", scale=resolution_scales[-1], enable_refine=False))
+
+    if final_round_cameras is None or final_round_targets is None or final_round_initial_stats is None:
+        raise AssertionError("training produced no final round state")
+    final_width = int(training_rounds[-1]["width"])
+    final_height = int(training_rounds[-1]["height"])
+    active_sh_degree_final = args.sh_degree
+    log(f"running final evaluation frames={len(final_round_cameras)} size={final_width}x{final_height}")
+    final_stats = evaluate_frames(
+        model,
+        final_round_cameras,
+        final_round_targets,
+        final_width,
+        final_height,
+        args.tile_size,
+        active_sh_degree_final,
+        args.ssim_lambda,
+        args.ssim_window_size,
+    )
+    eval_cameras = scale_camera_geometry(load_scanapp_cameras(eval_frames, final_width, final_height), TRAINING_GEOMETRY_SCALE) if eval_frames else []
+    eval_targets = [mx.array(load_target(camera.image_path, final_width, final_height)[None, ...], dtype=mx.float32) for camera in eval_cameras]
+    eval_initial_stats = evaluate_frames(model, eval_cameras, eval_targets, final_width, final_height, args.tile_size, active_sh_degree_final, args.ssim_lambda, args.ssim_window_size) if eval_cameras else []
+    eval_final_stats = eval_initial_stats
+    final_mean_loss = mean_loss(final_stats)
+
+    final_compare_image_count = 0
+    if args.write_final_compare:
+        for initial, final, target in zip(final_round_initial_stats, final_stats, final_round_targets, strict=True):
+            frame_index = final["frame_index"]
+            write_png(args.out_dir / f"compare_frame_{frame_index:05d}.png", image_to_u8(concat_compare(np.asarray(target[0]), initial["image"], final["image"])))
+            final_compare_image_count += 1
+
+    if last_loss is None or not np.isfinite(final_mean_loss):
+        raise AssertionError("ScanApp depth training loss should be finite")
+    if last_viewspace_grad is None or not np.any(np.abs(np.asarray(last_viewspace_grad)) > 1.0e-8):
+        raise AssertionError("ScanApp depth training expected nonzero viewspace_points gradient")
+
+    out_spz = args.out_spz if args.out_spz is not None else args.out_dir / "trained_scanapp_depth.spz"
+    export_model = make_export_geometry_model(model, TRAINING_GEOMETRY_SCALE)
+    spz_diagnostics = spz_export_diagnostics(export_model, "sh", active_sh_degree_final, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
+    exported_gaussians = export_trained_spz(out_spz, export_model, "sh", active_sh_degree_final, args.spz_scale_mode, args.spz_rotation_mode, args.spz_quat_order, args.spz_color_mode)
+    spz_size = out_spz.stat().st_size
+    if spz_size <= 0:
+        raise AssertionError(f"SPZ output is empty: {out_spz}")
+
+    frame_summaries = [
+        {
+            "frame_index": int(final["frame_index"]),
+            "initial_loss": float(initial["loss"]),
+            "final_loss": float(final["loss"]),
+            "initial_loss_components": initial["loss_components"],
+            "final_loss_components": final["loss_components"],
+            "initial_psnr": float(initial["psnr"]),
+            "final_psnr": float(final["psnr"]),
+            "initial_visible_gaussians": int(initial["visible_gaussians"]),
+            "final_visible_gaussians": int(final["visible_gaussians"]),
+            "initial_intersections": int(initial["intersections"]),
+            "final_intersections": int(final["intersections"]),
+        }
+        for initial, final in zip(final_round_initial_stats, final_stats, strict=True)
+    ]
+    eval_frame_summaries = [
+        {
+            "frame_index": int(final["frame_index"]),
+            "initial_loss": float(initial["loss"]),
+            "final_loss": float(final["loss"]),
+            "initial_loss_components": initial["loss_components"],
+            "final_loss_components": final["loss_components"],
+            "initial_psnr": float(initial["psnr"]),
+            "final_psnr": float(final["psnr"]),
+            "initial_visible_gaussians": int(initial["visible_gaussians"]),
+            "final_visible_gaussians": int(final["visible_gaussians"]),
+            "initial_intersections": int(initial["intersections"]),
+            "final_intersections": int(final["intersections"]),
+        }
+        for initial, final in zip(eval_initial_stats, eval_final_stats, strict=True)
+    ]
+    eval_final_mean_loss = mean_loss(eval_final_stats) if eval_final_stats else None
+
+    aggregate_ops = {
+        "clone": 0,
+        "split": 0,
+        "prune": 0,
+        "prune_by_reason": {"opacity": 0, "scale3d": 0, "scale2d": 0},
+        "opacity_reset": 0,
+    }
+    all_events = []
+    for round_summary in training_rounds:
+        ops = round_summary["refinement_strategy"]["operation_totals"]
+        aggregate_ops["clone"] += int(ops["clone"])
+        aggregate_ops["split"] += int(ops["split"])
+        aggregate_ops["prune"] += int(ops["prune"])
+        aggregate_ops["opacity_reset"] += int(ops["opacity_reset"])
+        aggregate_ops["prune_by_reason"]["opacity"] += int(ops["prune_by_reason"]["opacity"])
+        aggregate_ops["prune_by_reason"]["scale3d"] += int(ops["prune_by_reason"]["scale3d"])
+        aggregate_ops["prune_by_reason"]["scale2d"] += int(ops["prune_by_reason"]["scale2d"])
+        for event in round_summary["refinement_strategy"]["events"]:
+            all_events.append({"round": round_summary["round"], "phase": round_summary["phase"], **event})
+
+    final_opacity_diagnostics = opacity_diagnostics(model)
+    summary = {
+        "dataset_type": "scanapp_depth",
+        "dataset": str(args.data),
+        "raw_width": int(raw_width),
+        "raw_height": int(raw_height),
+        "legacy_width_arg": int(args.width),
+        "legacy_height_arg": int(args.height),
+        "width": int(final_width),
+        "height": int(final_height),
+        "raw_point_count": int(raw_point_count),
+        "candidate_point_count": int(raw_point_count),
+        "sampled_point_count": int(scene.sampled_point_count),
+        "target_point_count": int(args.target_points),
+        "retained_point_count": int(scene.retained_point_count),
+        "exported_gaussians": int(exported_gaussians),
+        "point_cloud_gaussians": int(points.shape[0] - args.num_random_gaussians),
+        "random_gaussians": int(args.num_random_gaussians),
+        "frames": int(frame_count),
+        "depth_frames": len(scene.frames),
+        "eval_frames": len(eval_cameras),
+        "confidence_frame_count": int(scene.confidence_frame_count),
+        "confidence_kept_count": int(scene.confidence_kept_count),
+        "confidence_rejected_count": int(scene.confidence_rejected_count),
+        "depth_valid_count": int(scene.depth_valid_count),
+        "depth_rejected_count": int(scene.depth_rejected_count),
+        "colorized_point_count": int(scene.colorized_point_count),
+        "depth_sample_step": int(scene.sample_step),
+        "steps": int(global_step),
+        "legacy_steps_arg": int(args.steps),
+        "step_image_interval": int(args.step_image_interval),
+        "step_image_count": int(step_image_count),
+        "step_image_dir": str(step_image_dir) if args.step_image_interval > 0 else None,
+        "final_compare_images_enabled": bool(args.write_final_compare),
+        "final_compare_image_count": int(final_compare_image_count),
+        "mlx_cache_limit_bytes": int(cache_limit_bytes),
+        "mlx_cache_limit_gb": float(args.mlx_cache_limit_gb),
+        "mlx_previous_cache_limit_bytes": int(previous_cache_limit),
+        "scene_scale": float(scene.scene_scale),
+        "resolved_scene_scale": float(resolved_scene_scale),
+        "training_plan": {
+            "mode": "multi_resolution_pingpong_rounds",
+            "resolution_scales": [float(item) for item in resolution_scales],
+            "refine_rounds": int(len(resolution_scales)),
+            "final_update_rounds": int(args.final_update_rounds),
+            "frame_count": int(frame_count),
+            "pingpong_order_length": int(pingpong_order_length),
+            "epoch_steps": int(epoch_steps),
+            "total_steps": int(global_step),
+            "optimizer_reset_each_round": False,
+            "optimizer_persists_across_rounds": True,
+            "refine_state_reset_each_round": True,
+            "model_parameters_continue_across_rounds": True,
+            "ratio_based_refine": True,
+        },
+        "final_update_only": {
+            "enabled": bool(args.final_update_rounds > 0),
+            "rounds": int(args.final_update_rounds),
+            "steps": int(epoch_steps * args.final_update_rounds),
+            "skips_update_state": True,
+            "skips_after_optimizer_step": True,
+            "skips_clone_split_prune_opacity_reset": True,
+        },
+        "training_geometry_scale": {
+            "enabled": bool(TRAINING_GEOMETRY_SCALE != 1.0),
+            "scale": float(TRAINING_GEOMETRY_SCALE),
+            "export_inverse_scale": float(1.0 / TRAINING_GEOMETRY_SCALE),
+            "points_scaled_before_training": True,
+            "camera_translations_scaled_before_training": True,
+            "scene_scale_scaled_for_refine": False,
+            "initial_log_scales_computed_before_geometry_scale": True,
+            "export_means_divided_by_scale": True,
+            "export_log_scales_shift": float(-np.log(float(TRAINING_GEOMETRY_SCALE))),
+        },
+        "initialization": {
+            "type": "scanapp_depth_reconstruction",
+            "scale_rule": "average distance to 3 nearest neighbors times init_scale",
+            "sampling_rule": "all valid depth pixels are reconstructed first, then globally sampled to target_point_count",
+            "init_scale": float(args.init_scale),
+            "opacity": float(args.opacity),
+            "point_extent": output_point_diagnostics,
+            "training_point_extent": point_diagnostics,
+            "log_scale_min": float(log_scales.min()),
+            "log_scale_mean": float(log_scales.mean()),
+            "log_scale_max": float(log_scales.max()),
+        },
+        "dataloader": {
+            "mode": "pingpong",
+            "batch_size": int(args.batch_size),
+            "frame_count": int(frame_count),
+            "order_length": int(pingpong_order_length),
+            "epoch_steps": int(epoch_steps),
+            "sampled_frame_indices": [[int(frames[idx].index) for idx in batch] for batch in order_batches[:16]],
+        },
+        "loss_config": {
+            "mode": "l1_ssim",
+            "formula": "(1 - ssim_lambda) * L1 + ssim_lambda * (1 - SSIM)",
+            "ssim_lambda": float(args.ssim_lambda),
+            "ssim_window_size": int(args.ssim_window_size),
+        },
+        "learning_rate_schedule": lr_schedules,
+        "initial_mean_loss": float(training_rounds[0]["initial_mean_loss"]),
+        "final_mean_loss": float(final_mean_loss),
+        "eval_final_mean_loss": eval_final_mean_loss,
+        "last_viewspace_grad_norm": last_viewspace_grad_norm,
+        "spz": str(out_spz),
+        "spz_file_size_bytes": int(spz_size),
+        "spz_export_diagnostics": spz_diagnostics,
+        "color_mode": "spherical_harmonics",
+        "active_sh_degree_final": int(active_sh_degree_final),
+        "sh_degree_schedule": {
+            "target": int(args.sh_degree),
+            "interval_ratio": float(args.sh_degree_interval_ratio),
+            "formula": "min(local_step // round_sh_degree_interval, sh_degree)",
+            "events": sh_degree_events,
+        },
+        "final_opacity_diagnostics": final_opacity_diagnostics,
+        "refinement_strategy": {
+            "rounds": [
+                {
+                    "round": item["round"],
+                    "phase": item["phase"],
+                    "scale": item["scale"],
+                    "width": item["width"],
+                    "height": item["height"],
+                    "steps": item["steps"],
+                    "schedule": item["schedule"],
+                    "refine_enabled": item["refine_enabled"],
+                    "update_only": item["update_only"],
+                    "operation_totals": item["refinement_strategy"]["operation_totals"],
+                    "event_count": item["refinement_strategy"]["event_count"],
+                    "topology_event_count": item["refinement_strategy"]["topology_event_count"],
+                }
+                for item in training_rounds
+            ],
+            "events": all_events,
+            "event_count": len(all_events),
+            "operation_totals": aggregate_ops,
+        },
+        "training_rounds": training_rounds,
+        "frame_summaries": frame_summaries,
+        "eval_frame_summaries": eval_frame_summaries,
+    }
+    out_model_npz = args.out_model_npz if args.out_model_npz is not None else args.out_dir / "trained_model_params.npz"
+    summary["model_npz"] = str(out_model_npz)
+    save_model_parameters_npz(out_model_npz, export_model, "sh", active_sh_degree_final, args.sh_degree, summary)
+    (args.out_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    out_spz.with_suffix(".json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    log(
+        "ScanApp depth multi-resolution training ok "
+        f"initial_mean_loss={summary['initial_mean_loss']:.8f} final_mean_loss={final_mean_loss:.8f} "
+        f"steps={global_step} last_viewspace_grad_norm={last_viewspace_grad_norm:.8f} "
         f"spz={out_spz} bytes={spz_size} output_dir={args.out_dir}"
     )
 

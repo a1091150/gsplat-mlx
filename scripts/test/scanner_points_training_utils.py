@@ -341,6 +341,7 @@ class ScannerDefaultStrategyConfig:
     refine_start_iter: int = 500
     refine_stop_iter: int = 15000
     reset_every: int = 3000
+    opacity_reset_steps: list[int] | None = None
     refine_every: int = 100
     pause_refine_after_reset: int = 0
     scene_scale: float = 1.0
@@ -357,6 +358,10 @@ class ScannerDefaultStrategyConfig:
         )
 
     def should_reset_opacity(self, step: int) -> bool:
+        if not self.enabled or step <= 0:
+            return False
+        if self.opacity_reset_steps is not None:
+            return int(step) in set(int(item) for item in self.opacity_reset_steps)
         return self.enabled and step > 0 and step % self.reset_every == 0
 
 
